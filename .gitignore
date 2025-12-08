@@ -1,8 +1,11 @@
 # created by virtualenv automatically
 .env
 *.env
+
 .autoGit.bat
 *.autoGit.bat
 
 .venv
 *.venv
+
+__pycache__/

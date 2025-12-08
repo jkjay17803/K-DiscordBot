@@ -9,9 +9,9 @@ def check_jk():
     return commands.check(predicate)
 
 
-def message_with_channel_id(bot):
+def message_with_channel_id(k):
 
-    @bot.command(name="메시지")
+    @k.command(name="메시지")
     @check_jk()
     async def send_message(ctx, channel_id: int):
 
@@ -23,7 +23,7 @@ def message_with_channel_id(bot):
         target_msg = messages[1]
 
 
-        target_channel = bot.get_channel(channel_id)
+        target_channel = k.get_channel(channel_id)
         if target_channel is None:
             await ctx.send("채널을 찾을 수 없습니다. 채널 ID를 확인해주세요.")
             return
