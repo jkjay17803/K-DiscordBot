@@ -1,43 +1,46 @@
 # level_system.py - 레벨 시스템 로직
 
-import math
-from config import BASE_EXP, TIER_MULTIPLIER, POINTS_PER_LEVEL
+from config import EXP_PER_MINUTE, LEVEL_RANGES
 from database import (
     get_or_create_user, update_user_exp, update_user_level,
     update_user_points
 )
 
 
+def get_level_range(level: int) -> tuple:
+    """
+    레벨에 해당하는 구간 정보 반환
+    Returns: (레벨업_시간_분, 레벨업_포인트) 또는 None
+    """
+    for (start, end), (minutes, points) in LEVEL_RANGES.items():
+        if start <= level <= end:
+            return (minutes, points)
+    
+    # 설정에 없는 레벨은 마지막 구간의 값 사용
+    if LEVEL_RANGES:
+        last_range = max(LEVEL_RANGES.keys(), key=lambda x: x[1])
+        return LEVEL_RANGES[last_range]
+    
+    # 기본값
+    return (10, 10)
+
+
 def calculate_required_exp(level: int) -> int:
     """
     레벨업에 필요한 exp 계산
-    레벨의 10의 단위가 바뀔 때마다 필요 exp가 3-4배 증가
+    레벨업 시간(분) * EXP_PER_MINUTE
     """
     if level < 1:
-        return BASE_EXP
+        level = 1
     
-    # 현재 레벨이 속한 티어 계산 (0티어: 1-9, 1티어: 10-19, ...)
-    tier = (level - 1) // 10
-    tier_level = level - (tier * 10)  # 티어 내에서의 레벨 (1-10)
-    
-    if tier == 0:
-        # 1-9레벨: 기본 exp
-        return BASE_EXP * tier_level
-    else:
-        # 10레벨 이상: 이전 티어의 마지막 exp를 기준으로 배수 적용
-        prev_tier_last_exp = BASE_EXP * 9  # 9레벨까지의 exp
-        
-        # 각 티어마다 배수 적용
-        tier_base_exp = prev_tier_last_exp * (TIER_MULTIPLIER ** tier)
-        
-        # 티어 내에서의 exp 계산
-        if tier_level == 1:
-            # 티어의 첫 레벨 (10, 20, 30, ...)
-            return int(tier_base_exp)
-        else:
-            # 티어 내에서 점진적 증가
-            exp_increment = tier_base_exp / 9  # 티어 내 9단계로 나눔
-            return int(tier_base_exp + (exp_increment * (tier_level - 1)))
+    minutes, _ = get_level_range(level)
+    return int(minutes * EXP_PER_MINUTE)
+
+
+def get_points_for_level(level: int) -> int:
+    """레벨에 해당하는 레벨업 시 지급되는 포인트 반환"""
+    _, points = get_level_range(level)
+    return points
 
 
 def calculate_level_from_total_exp(total_exp: int) -> tuple[int, int]:
@@ -93,9 +96,14 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
     points_earned = 0
     
     if leveled_up:
-        # 레벨업한 만큼 포인트 지급
+        # 레벨업한 만큼 포인트 지급 (각 레벨마다 티어별 포인트 적용)
         levels_gained = new_level - current_level
-        points_earned = levels_gained * POINTS_PER_LEVEL
+        points_earned = 0
+        
+        # 각 레벨업마다 해당 레벨의 티어에 맞는 포인트 지급
+        for level in range(current_level + 1, new_level + 1):
+            points_earned += get_points_for_level(level)
+        
         new_points = current_points + points_earned
         
         await update_user_level(user_id, guild_id, new_level, new_exp, new_points)
