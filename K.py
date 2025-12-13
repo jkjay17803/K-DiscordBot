@@ -67,6 +67,9 @@ async def on_ready():
     voice_monitor = setup_voice_monitor(k)
     print("[VoiceMonitor] Voice monitoring enabled")
     
+    # 봇 시작 시 이미 음성채널에 있는 사용자들 초기화
+    await voice_monitor.initialize_existing_voice_users()
+    
     # 처음 실행 시 모든 닉네임 즉시 업데이트
     await initial_nickname_update(k)
     

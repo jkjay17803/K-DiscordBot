@@ -12,6 +12,7 @@ from database import (
 )
 from level_system import add_exp
 from nickname_manager import update_user_nickname
+from logger import send_levelup_log
 
 
 class VoiceMonitor:
@@ -111,9 +112,18 @@ class VoiceMonitor:
                 # exp 추가
                 result = await add_exp(user_id, guild_id, EXP_PER_MINUTE)
                 
-                # 레벨업 시 닉네임 업데이트
+                # 레벨업 시 닉네임 업데이트 및 로그 전송
                 if result['leveled_up']:
                     await update_user_nickname(member, result['new_level'])
+                    await send_levelup_log(
+                        self.bot,
+                        member,
+                        result['old_level'],
+                        result['new_level'],
+                        result['points_earned'],
+                        result['new_points'],
+                        "음성채널"
+                    )
                     print(f"[VoiceMonitor] {member.name} leveled up to {result['new_level']}!")
                 
         except asyncio.CancelledError:
@@ -121,6 +131,34 @@ class VoiceMonitor:
             pass
         except Exception as e:
             print(f"[VoiceMonitor] Error in exp accumulation for {member.name}: {e}")
+    
+    async def initialize_existing_voice_users(self):
+        """봇 시작 시 이미 음성채널에 있는 사용자들을 초기화"""
+        print("[VoiceMonitor] 초기화: 이미 음성채널에 있는 사용자 확인 중...")
+        initialized_count = 0
+        
+        for guild in self.bot.guilds:
+            # 서버의 모든 음성채널 확인
+            for channel in guild.voice_channels:
+                # 채널에 있는 모든 멤버 확인
+                for member in channel.members:
+                    # 봇은 무시
+                    if member.bot:
+                        continue
+                    
+                    # 이미 세션이 있으면 스킵
+                    if member.id in self.active_sessions:
+                        continue
+                    
+                    # 사용자 초기화
+                    try:
+                        await self._handle_voice_join(member, channel, guild.id, member.id)
+                        initialized_count += 1
+                        print(f"[VoiceMonitor] 초기화: {member.name}가 이미 {channel.name}에 있음")
+                    except Exception as e:
+                        print(f"[VoiceMonitor] 초기화 실패: {member.name} - {e}")
+        
+        print(f"[VoiceMonitor] 초기화 완료: {initialized_count}명의 사용자 세션 시작")
     
     def get_active_users(self) -> list:
         """현재 음성채널에 있는 사용자 목록 반환"""

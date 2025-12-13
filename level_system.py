@@ -86,7 +86,7 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
     current_points = user['points']
     
     # 총 exp에 추가
-    new_total_exp = current_total_exp #+ exp_to_add
+    new_total_exp = current_total_exp + exp_to_add # 임시
     
     # 새로운 레벨과 exp 계산
     new_level, new_exp = calculate_level_from_total_exp(new_total_exp)
@@ -114,11 +114,79 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
     
     return {
         'leveled_up': leveled_up,
+        'old_level': current_level,
         'new_level': new_level,
         'new_exp': new_exp,
         'points_earned': points_earned,
         'new_points': new_points,
         'required_exp': calculate_required_exp(new_level)
+    }
+
+
+async def set_level(user_id: int, guild_id: int, target_level: int) -> dict:
+    """
+    사용자의 레벨을 직접 설정
+    Returns: {
+        'old_level': int,
+        'new_level': int,
+        'new_exp': int,
+        'points_earned': int,
+        'new_points': int
+    }
+    """
+    if target_level < 1:
+        target_level = 1
+    
+    user = await get_or_create_user(user_id, guild_id)
+    
+    old_level = user['level']
+    current_points = user['points']
+    
+    # 레벨이 같으면 변경 없음
+    if old_level == target_level:
+        return {
+            'old_level': old_level,
+            'new_level': target_level,
+            'new_exp': 0,
+            'points_earned': 0,
+            'new_points': current_points,
+            'required_exp': calculate_required_exp(target_level)
+        }
+    
+    # 목표 레벨까지 필요한 총 exp 계산
+    total_exp_needed = 0
+    for level in range(1, target_level):
+        total_exp_needed += calculate_required_exp(level)
+    
+    # 목표 레벨의 현재 exp는 0으로 설정
+    new_exp = 0
+    new_total_exp = total_exp_needed
+    
+    # 레벨업한 만큼 포인트 지급
+    points_earned = 0
+    if target_level > old_level:
+        # 레벨업한 레벨들에 대한 포인트 지급
+        for level in range(old_level + 1, target_level + 1):
+            points_earned += get_points_for_level(level)
+    else:
+        # 레벨 다운인 경우 포인트 차감 (레벨 다운한 레벨들의 포인트 회수)
+        for level in range(target_level + 1, old_level + 1):
+            points_earned -= get_points_for_level(level)
+    
+    new_points = current_points + points_earned
+    if new_points < 0:
+        new_points = 0
+    
+    # 데이터베이스 업데이트
+    await update_user_level(user_id, guild_id, target_level, new_exp, new_total_exp)
+    
+    return {
+        'old_level': old_level,
+        'new_level': target_level,
+        'new_exp': new_exp,
+        'points_earned': points_earned,
+        'new_points': new_points,
+        'required_exp': calculate_required_exp(target_level)
     }
 
 
