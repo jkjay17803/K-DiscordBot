@@ -1,9 +1,8 @@
 # database.py - 데이터베이스 관리
 
-import sqlite3
 import aiosqlite
 from datetime import datetime
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 DB_PATH = "k_bot.db"
 
@@ -88,14 +87,14 @@ async def update_user_exp(user_id: int, guild_id: int, exp: int, total_exp: int)
         await db.commit()
 
 
-async def update_user_level(user_id: int, guild_id: int, level: int, exp: int, points: int):
-    """사용자 레벨, exp, 포인트 업데이트"""
+async def update_user_level(user_id: int, guild_id: int, level: int, exp: int, points: int, total_exp: int):
+    """사용자 레벨, exp, 포인트, 총 exp 업데이트"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """UPDATE users 
-               SET level = ?, exp = ?, points = ?
+               SET level = ?, exp = ?, points = ?, total_exp = ?
                WHERE user_id = ? AND guild_id = ?""",
-            (level, exp, points, user_id, guild_id)
+            (level, exp, points, total_exp, user_id, guild_id)
         )
         await db.commit()
 

@@ -3,7 +3,6 @@
 import discord
 from discord.ext import commands
 from level_system import get_user_level_info
-from database import get_or_create_user
 from config import RANK_COMMAND_CHANNEL_ID
 
 # 명령어가 이미 등록되었는지 확인하는 플래그

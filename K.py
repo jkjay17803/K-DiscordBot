@@ -72,7 +72,7 @@ async def on_ready():
     
     # 처음 실행 시 모든 닉네임 즉시 업데이트
     await initial_nickname_update(k)
-    
+
     # 닉네임 새로고침 백그라운드 작업 시작
     nickname_refresh_task = setup_nickname_refresh(k)
     print("[NicknameManager] Nickname refresh task started")

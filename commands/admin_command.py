@@ -14,27 +14,6 @@ def check_jk():
     return commands.check(predicate)
 
 
-def get_target_user(ctx, user_input: str):
-    """사용자 입력으로부터 대상 사용자 반환"""
-    # 멘션 처리
-    if ctx.message.mentions:
-        return ctx.message.mentions[0]
-    
-    # "iiii" 처리
-    if user_input.lower() == "iiii":
-        return ctx.author
-    
-    # 사용자 ID 처리
-    try:
-        target_user_id = int(user_input)
-        target_user = ctx.guild.get_member(target_user_id)
-        if target_user is None:
-            return None
-        return target_user
-    except ValueError:
-        return None
-
-
 def admin_command(k):
 
     @k.group(name="jk레벨")
@@ -238,4 +217,3 @@ def admin_command(k):
             await ctx.send("❌ 레벨은 숫자여야 합니다.")
         else:
             await ctx.send(f"❌ 오류가 발생했습니다: {error}")
-

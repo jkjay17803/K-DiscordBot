@@ -3,7 +3,6 @@
 from config import EXP_PER_MINUTE, LEVEL_RANGES
 from database import (
     get_or_create_user, update_user_exp, update_user_level,
-    update_user_points
 )
 
 
@@ -86,7 +85,7 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
     current_points = user['points']
     
     # 총 exp에 추가
-    new_total_exp = current_total_exp + exp_to_add # 임시
+    new_total_exp = current_total_exp + exp_to_add
     
     # 새로운 레벨과 exp 계산
     new_level, new_exp = calculate_level_from_total_exp(new_total_exp)
@@ -106,7 +105,7 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
         
         new_points = current_points + points_earned
         
-        await update_user_level(user_id, guild_id, new_level, new_exp, new_points)
+        await update_user_level(user_id, guild_id, new_level, new_exp, new_points, new_total_exp)
     else:
         # exp만 업데이트
         await update_user_exp(user_id, guild_id, new_exp, new_total_exp)
@@ -178,7 +177,7 @@ async def set_level(user_id: int, guild_id: int, target_level: int) -> dict:
         new_points = 0
     
     # 데이터베이스 업데이트
-    await update_user_level(user_id, guild_id, target_level, new_exp, new_total_exp)
+    await update_user_level(user_id, guild_id, target_level, new_exp, new_points, new_total_exp)
     
     return {
         'old_level': old_level,
