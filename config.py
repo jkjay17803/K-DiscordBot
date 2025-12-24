@@ -53,7 +53,8 @@ VOICE_CHECK_INTERVAL = 60  # 1분마다 exp 체크 (초 단위)
 
 # 명령어 제한 채널
 RANK_COMMAND_CHANNEL_ID = 1447457558762622976  # None이면 모든 채널에서 사용 가능, 채널 ID를 입력하면 해당 채널에서만 사용 가능
-
+MARKET_COMMAND_CHANNEL_ID = 1453344981141033018  # 마켓 명령어 채널 ID
 # 로그 채널
-LOG_CHANNEL_ID = 1449333459037192192  # JK 명령어 및 레벨업 로그를 전송할 채널 ID
-
+LOG_CHANNEL_ID_JK = 1449333459037192192  # JK 명령어 로그를 전송할 채널 ID
+LOG_CHANNEL_ID_LEVEL = 1453357356363677739  # 레벨업 로그를 전송할 채널 ID
+LOG_CHANNEL_ID_MARKET = 1453357389418991667  # 마켓 관련 로그를 전송할 채널 ID

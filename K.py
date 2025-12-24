@@ -32,6 +32,7 @@ from nickname_manager import setup_nickname_refresh, initial_nickname_update
 from commands.level_command import level_command
 from commands.rank_command import rank_command
 from commands.admin_command import admin_command
+from commands.market_command import market_command
 
 load_dotenv()
 
@@ -48,6 +49,7 @@ message_with_channel_id(k)
 level_command(k)
 rank_command(k)
 admin_command(k)
+market_command(k)
 
 # onEnable
 @k.event
@@ -78,6 +80,19 @@ async def on_ready():
     print("[NicknameManager] Nickname refresh task started")
     
     print("K 봇이 준비되었습니다!")
+
+
+@k.event
+async def on_command_error(ctx, error):
+    """명령어 에러 핸들러"""
+    # CommandNotFound 에러는 사용자에게 메시지 전송 (터미널 로그 방지)
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send(f"❌ `{ctx.invoked_with}` 명령어를 찾을 수 없습니다.")
+        return
+    
+    # 다른 에러는 기본 동작 유지 (터미널에 로그 출력)
+    raise error
+
 
 #running - jk
 k.run(TOKEN)

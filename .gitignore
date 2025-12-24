@@ -8,4 +8,9 @@
 .venv
 *.venv
 
+.
+
 __pycache__/
+
+# market 폴더
+market/d
