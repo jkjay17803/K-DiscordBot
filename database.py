@@ -38,6 +38,14 @@ async def init_database():
             )
         """)
         
+        # guild_settings 테이블
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id INTEGER PRIMARY KEY,
+                market_enabled INTEGER DEFAULT 1
+            )
+        """)
+        
         await db.commit()
 
 
@@ -280,4 +288,30 @@ async def initialize_all_members(guilds) -> dict:
                 continue
     
     return {'created': created, 'skipped': skipped}
+
+
+async def get_market_enabled(guild_id: int) -> bool:
+    """마켓 활성화 상태 조회 (기본값: True)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT market_enabled FROM guild_settings WHERE guild_id = ?",
+            (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                # 기본값으로 설정 생성
+                await set_market_enabled(guild_id, True)
+                return True
+            return bool(row[0])
+
+
+async def set_market_enabled(guild_id: int, enabled: bool):
+    """마켓 활성화 상태 설정"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO guild_settings (guild_id, market_enabled)
+               VALUES (?, ?)""",
+            (guild_id, 1 if enabled else 0)
+        )
+        await db.commit()
 

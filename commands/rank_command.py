@@ -19,8 +19,11 @@ def rank_command(k):
         사용법: !순위 [포인트|레벨]
         기본값: 포인트
         """
-        # 채널 제한 체크
-        if RANK_COMMAND_CHANNEL_ID is not None:
+        # JK 권한 체크 (JK 권한이 있으면 채널 제한 무시)
+        has_jk_role = any(role.name == "JK" for role in ctx.author.roles)
+        
+        # 채널 제한 체크 (JK 권한이 없을 때만)
+        if not has_jk_role and RANK_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != RANK_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{RANK_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return

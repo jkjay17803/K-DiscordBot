@@ -5,6 +5,7 @@ import re
 import discord
 from config import NICKNAME_FORMAT, NICKNAME_REFRESH_INTERVAL
 from database import get_all_users_for_nickname_refresh, update_last_nickname_update
+from role_manager import update_tier_role
 
 
 def extract_level_from_nickname(nickname: str) -> int:
@@ -184,6 +185,9 @@ async def refresh_all_nicknames(bot):
                     updated_count += 1
                 else:
                     failed_count += 1
+                
+                # 티어 역할 동기화 (축하 메시지는 보내지 않음 - 동기화이므로)
+                await update_tier_role(member, level)
                 
                 # API 레이트 리밋 방지를 위해 약간의 딜레이
                 await asyncio.sleep(0.1)

@@ -2,7 +2,7 @@
 
 import discord
 from datetime import datetime
-from config import LOG_CHANNEL_ID_JK, LOG_CHANNEL_ID_LEVEL, LOG_CHANNEL_ID_MARKET
+from config import LOG_CHANNEL_ID_JK, LOG_CHANNEL_ID_LEVEL, LOG_CHANNEL_ID_MARKET, TIER_CONGRATULATION_CHANNEL_ID
 
 
 async def send_command_log(bot, executor: discord.Member, command: str, target_user: discord.Member = None, details: str = ""):
@@ -173,3 +173,56 @@ async def send_purchase_log(bot, user: discord.Member, item_name: str, item_code
         await channel.send(embed=embed)
     except Exception as e:
         print(f"[Logger] 구매 로그 전송 실패: {e}")
+
+
+async def send_tier_upgrade_log(bot, user: discord.Member, old_tier: str, new_tier: str, level: int):
+    """
+    티어 업그레이드 축하 메시지 전송
+    """
+    if TIER_CONGRATULATION_CHANNEL_ID is None:
+        return
+    
+    try:
+        channel = bot.get_channel(TIER_CONGRATULATION_CHANNEL_ID)
+        if channel is None:
+            print(f"[Logger] 티어 축하 채널을 찾을 수 없습니다. (ID: {TIER_CONGRATULATION_CHANNEL_ID})")
+            return
+        
+        # 티어 이모지 매핑
+        tier_emojis = {
+            "브론즈": "🥉",
+            "실버": "🥈",
+            "골드": "🥇",
+            "다이아": "💎",
+            "플레티넘": "💠",
+            "루비": "💍"
+        }
+        
+        old_emoji = tier_emojis.get(old_tier, "🏅")
+        new_emoji = tier_emojis.get(new_tier, "🏅")
+        
+        embed = discord.Embed(
+            title=f"{new_emoji} 티어 업그레이드!",
+            description=f"**{user.display_name}** ({user.mention})님이 **{new_tier}** 티어에 도달했습니다!",
+            color=discord.Color.gold(),
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(
+            name="티어 변화",
+            value=f"{old_emoji} **{old_tier}** → {new_emoji} **{new_tier}**",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="현재 레벨",
+            value=f"**{level}**",
+            inline=True
+        )
+        
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text="축하합니다! 🎉")
+        
+        await channel.send(embed=embed)
+    except Exception as e:
+        print(f"[Logger] 티어 업그레이드 축하 메시지 전송 실패: {e}")

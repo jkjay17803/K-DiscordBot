@@ -46,13 +46,14 @@ def ensure_market_dir():
 
 
 def get_market_files() -> List[str]:
-    """모든 마켓 파일 목록 반환 (YY_MM_market.txt 형식)"""
+    """마켓 파일 목록 반환 (market.txt)"""
     ensure_market_dir()
     files = []
-    for file in os.listdir(MARKET_DIR):
-        if file.endswith("_market.txt"):
-            files.append(file)
-    return sorted(files, reverse=True)  # 최신 파일이 먼저 오도록
+    market_file = "market.txt"
+    filepath = os.path.join(MARKET_DIR, market_file)
+    if os.path.exists(filepath):
+        files.append(market_file)
+    return files
 
 
 def parse_market_file(filename: str) -> List[MarketItem]:

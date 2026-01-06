@@ -9,6 +9,7 @@ from market_manager import (
 )
 from logger import send_purchase_log
 from config import MARKET_COMMAND_CHANNEL_ID
+from database import get_market_enabled
 
 
 def market_command(k):
@@ -19,8 +20,18 @@ def market_command(k):
         마켓의 모든 물품 정보를 표시합니다.
         사용법: !마켓
         """
-        # 채널 제한 체크
-        if MARKET_COMMAND_CHANNEL_ID is not None:
+        # JK 권한 체크 (JK 권한이 있으면 마켓 활성화 및 채널 제한 무시)
+        has_jk_role = any(role.name == "JK" for role in ctx.author.roles)
+        
+        # 마켓 활성화 상태 체크 (JK 권한이 없을 때만)
+        if not has_jk_role:
+            market_enabled = await get_market_enabled(ctx.guild.id)
+            if not market_enabled:
+                await ctx.send("❌ 현재 마켓이 비활성화되어 있습니다. 관리자에게 문의하세요.")
+                return
+        
+        # 채널 제한 체크 (JK 권한이 없을 때만)
+        if not has_jk_role and MARKET_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != MARKET_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{MARKET_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return
@@ -81,8 +92,18 @@ def market_command(k):
         티켓을 구매합니다.
         사용법: !구매 [물품 코드]
         """
-        # 채널 제한 체크
-        if MARKET_COMMAND_CHANNEL_ID is not None:
+        # JK 권한 체크 (JK 권한이 있으면 마켓 활성화 및 채널 제한 무시)
+        has_jk_role = any(role.name == "JK" for role in ctx.author.roles)
+        
+        # 마켓 활성화 상태 체크 (JK 권한이 없을 때만)
+        if not has_jk_role:
+            market_enabled = await get_market_enabled(ctx.guild.id)
+            if not market_enabled:
+                await ctx.send("❌ 현재 마켓이 비활성화되어 있습니다. 관리자에게 문의하세요.")
+                return
+        
+        # 채널 제한 체크 (JK 권한이 없을 때만)
+        if not has_jk_role and MARKET_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != MARKET_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{MARKET_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return
@@ -184,8 +205,18 @@ def market_command(k):
         자신이 구매한 티켓 목록을 표시합니다.
         사용법: !티켓목록
         """
-        # 채널 제한 체크
-        if MARKET_COMMAND_CHANNEL_ID is not None:
+        # JK 권한 체크 (JK 권한이 있으면 마켓 활성화 및 채널 제한 무시)
+        has_jk_role = any(role.name == "JK" for role in ctx.author.roles)
+        
+        # 마켓 활성화 상태 체크 (JK 권한이 없을 때만)
+        if not has_jk_role:
+            market_enabled = await get_market_enabled(ctx.guild.id)
+            if not market_enabled:
+                await ctx.send("❌ 현재 마켓이 비활성화되어 있습니다. 관리자에게 문의하세요.")
+                return
+        
+        # 채널 제한 체크 (JK 권한이 없을 때만)
+        if not has_jk_role and MARKET_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != MARKET_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{MARKET_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return
