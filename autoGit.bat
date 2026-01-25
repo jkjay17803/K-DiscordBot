@@ -21,11 +21,12 @@ if "!GIT_EMAIL!"=="" (
     git config --global user.email "!GIT_EMAIL!"
 )
 
-rem === Ensure .env is ignored and removed from staging ===
+rem === Ensure .env, k_bot.db are ignored and removed from staging ===
 if not exist ".gitignore" echo .env > .gitignore
 findstr /x ".env" .gitignore >nul 2>&1
 if errorlevel 1 echo .env>>.gitignore
 git rm --cached .env 2>nul
+git rm --cached k_bot.db 2>nul
 
 rem === Check remote repository ===
 git remote get-url origin >nul 2>&1
