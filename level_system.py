@@ -1,6 +1,6 @@
 # level_system.py - 레벨 시스템 로직
 
-from config import EXP_PER_MINUTE, LEVEL_RANGES
+from config import EXP_PER_MINUTE, get_level_ranges
 from database import (
     get_or_create_user, update_user_exp, update_user_level, update_user_points,
 )
@@ -11,14 +11,16 @@ def get_level_range(level: int) -> tuple:
     레벨에 해당하는 구간 정보 반환
     Returns: (레벨업_시간_분, 레벨업_포인트) 또는 None
     """
-    for (start, end), (minutes, points) in LEVEL_RANGES.items():
+    level_ranges = get_level_ranges()  # 동적으로 로드
+    
+    for (start, end), (minutes, points) in level_ranges.items():
         if start <= level <= end:
             return (minutes, points)
     
     # 설정에 없는 레벨은 마지막 구간의 값 사용
-    if LEVEL_RANGES:
-        last_range = max(LEVEL_RANGES.keys(), key=lambda x: x[1])
-        return LEVEL_RANGES[last_range]
+    if level_ranges:
+        last_range = max(level_ranges.keys(), key=lambda x: x[1])
+        return level_ranges[last_range]
     
     # 기본값
     return (10, 10)
@@ -66,18 +68,54 @@ def calculate_level_from_total_exp(total_exp: int) -> tuple[int, int]:
             return (1000, total_exp - exp_needed)
 
 
-async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
+async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction: bool = False) -> dict:
     """
     사용자에게 exp 추가
+    Args:
+        use_transaction: True면 트랜잭션 모드 (커밋하지 않음, 호출자가 커밋/롤백 처리)
     Returns: {
         'leveled_up': bool,
         'new_level': int,
         'new_exp': int,
         'points_earned': int,
-        'new_points': int
+        'new_points': int,
+        'db': aiosqlite.Connection (use_transaction=True일 때만)
     }
     """
-    user = await get_or_create_user(user_id, guild_id)
+    import aiosqlite
+    from database import DB_PATH, get_user, create_user
+    
+    # 트랜잭션 모드
+    if use_transaction:
+        db = await aiosqlite.connect(DB_PATH)
+        await db.execute("BEGIN TRANSACTION")
+        
+        try:
+            # 사용자 조회 (트랜잭션 내)
+            async with db.execute(
+                "SELECT level, exp, points, total_exp FROM users WHERE user_id = ? AND guild_id = ?",
+                (user_id, guild_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    # 사용자 생성 (트랜잭션 내)
+                    from datetime import datetime
+                    await db.execute(
+                        """INSERT INTO users 
+                           (user_id, guild_id, level, exp, points, total_exp, last_nickname_update)
+                           VALUES (?, ?, 1, 0, 0, 0, ?)""",
+                        (user_id, guild_id, datetime.now().isoformat())
+                    )
+                    user = {'level': 1, 'exp': 0, 'points': 0, 'total_exp': 0}
+                else:
+                    user = {'level': row[0], 'exp': row[1], 'points': row[2], 'total_exp': row[3]}
+        except Exception as e:
+            await db.rollback()
+            await db.close()
+            raise e
+    else:
+        db = None
+        user = await get_or_create_user(user_id, guild_id)
     
     current_level = user['level']
     current_exp = user['exp']
@@ -105,13 +143,13 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
         
         new_points = current_points + points_earned
         
-        await update_user_level(user_id, guild_id, new_level, new_exp, new_points, new_total_exp)
+        await update_user_level(user_id, guild_id, new_level, new_exp, new_points, new_total_exp, db=db)
     else:
         # exp만 업데이트
-        await update_user_exp(user_id, guild_id, new_exp, new_total_exp)
+        await update_user_exp(user_id, guild_id, new_exp, new_total_exp, db=db)
         new_points = current_points
     
-    return {
+    result = {
         'leveled_up': leveled_up,
         'old_level': current_level,
         'new_level': new_level,
@@ -122,6 +160,11 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int) -> dict:
         'new_total_exp': new_total_exp,
         'required_exp': calculate_required_exp(new_level)
     }
+    
+    if use_transaction:
+        result['db'] = db
+    
+    return result
 
 
 async def set_level(user_id: int, guild_id: int, target_level: int) -> dict:
@@ -381,9 +424,11 @@ async def add_level(user_id: int, guild_id: int, levels_to_add: int) -> dict:
     }
 
 
-async def add_points(user_id: int, guild_id: int, points_to_add: int) -> dict:
+async def add_points(user_id: int, guild_id: int, points_to_add: int, allow_negative: bool = False) -> dict:
     """
     사용자에게 포인트 추가
+    Args:
+        allow_negative: True이면 마이너스 포인트 허용 (경고 시스템 등에서 사용)
     Returns: {
         'old_points': int,
         'new_points': int
@@ -394,7 +439,7 @@ async def add_points(user_id: int, guild_id: int, points_to_add: int) -> dict:
     old_points = user['points']
     new_points = old_points + points_to_add
     
-    if new_points < 0:
+    if not allow_negative and new_points < 0:
         new_points = 0
     
     await update_user_points(user_id, guild_id, new_points)

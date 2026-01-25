@@ -8,6 +8,7 @@ from database import (
 )
 from level_system import get_user_level_info
 from config import RANK_COMMAND_CHANNEL_ID
+from utils import has_jk_role
 
 
 def rank_command(k):
@@ -20,10 +21,10 @@ def rank_command(k):
         기본값: 포인트
         """
         # JK 권한 체크 (JK 권한이 있으면 채널 제한 무시)
-        has_jk_role = any(role.name == "JK" for role in ctx.author.roles)
+        user_has_jk = has_jk_role(ctx.author)
         
         # 채널 제한 체크 (JK 권한이 없을 때만)
-        if not has_jk_role and RANK_COMMAND_CHANNEL_ID is not None:
+        if not user_has_jk and RANK_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != RANK_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{RANK_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return

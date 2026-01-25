@@ -4,8 +4,9 @@ import asyncio
 import re
 import discord
 from config import NICKNAME_FORMAT, NICKNAME_REFRESH_INTERVAL
-from database import get_all_users_for_nickname_refresh, update_last_nickname_update
+from database import get_all_users_for_nickname_refresh, update_last_nickname_update, get_user
 from role_manager import update_tier_role
+from utils import has_jk_role
 
 
 def extract_level_from_nickname(nickname: str) -> int:
@@ -92,9 +93,13 @@ def format_nickname_with_level(original_nickname: str, level: int) -> str:
 
 async def update_user_nickname(member, level: int):
     """사용자 닉네임에 레벨 표시 업데이트"""
+    # 봇이 변경 중임을 표시 (무한 루프 방지)
+    if hasattr(member.guild.me, '_nickname_update_in_progress'):
+        member.guild.me._nickname_update_in_progress.add(member.id)
+    
     try:
         # JK 역할을 가진 사용자는 운영자 아이콘 표시
-        if any(role.name == "JK" for role in member.roles):
+        if has_jk_role(member):
             # 봇이 닉네임을 변경할 수 있는 권한이 있는지 확인
             if not member.guild.me.guild_permissions.manage_nicknames:
                 return False
@@ -148,6 +153,10 @@ async def update_user_nickname(member, level: int):
     except Exception as e:
         print(f"[NicknameManager] Error updating nickname for {member.name}: {e}")
         return False
+    finally:
+        # 봇이 변경 완료 표시
+        if hasattr(member.guild.me, '_nickname_update_in_progress'):
+            member.guild.me._nickname_update_in_progress.discard(member.id)
 
 
 async def refresh_all_nicknames(bot):
@@ -240,4 +249,65 @@ def setup_nickname_refresh(bot):
     """닉네임 새로고침 백그라운드 작업 시작"""
     task = asyncio.create_task(refresh_all_nicknames(bot))
     return task
+
+
+async def check_and_restore_nickname(member: discord.Member, level: int) -> bool:
+    """
+    닉네임의 레벨 표시가 올바른지 확인하고 필요시 복원
+    Returns: 복원 여부 (True: 복원됨, False: 이미 올바름 또는 복원 불가)
+    """
+    try:
+        current_nickname = member.display_name or member.name
+        
+        # JK 역할 사용자는 운영자 아이콘만 체크
+        if has_jk_role(member):
+            # JK 역할 사용자는 update_user_nickname에서 처리
+            return await update_user_nickname(member, level)
+        
+        # 레벨 표시 추출
+        extracted_level = extract_level_from_nickname(current_nickname)
+        
+        # 레벨 표시가 없거나 잘못되었으면 복원
+        if extracted_level != level:
+            return await update_user_nickname(member, level)
+        
+        # 이미 올바른 레벨 표시가 있으면 스킵
+        return False
+        
+    except Exception as e:
+        print(f"[NicknameManager] Error checking nickname for {member.name}: {e}")
+        return False
+
+
+def setup_nickname_update_event(bot):
+    """닉네임 변경 이벤트 핸들러 설정"""
+    # 봇이 닉네임을 변경 중인지 추적 (무한 루프 방지)
+    bot._nickname_update_in_progress = set()
+    
+    @bot.event
+    async def on_member_update(before: discord.Member, after: discord.Member):
+        """멤버 정보 업데이트 감지 (닉네임 변경 등)"""
+        # 봇은 무시
+        if after.bot:
+            return
+        
+        # 닉네임이 변경되었는지 확인
+        if before.display_name != after.display_name:
+            # 봇이 변경한 경우는 무시 (무한 루프 방지)
+            if after.id in bot._nickname_update_in_progress:
+                bot._nickname_update_in_progress.discard(after.id)
+                return
+            
+            # 사용자 레벨 조회
+            try:
+                user = await get_user(after.id, after.guild.id)
+                if user:
+                    # 레벨 표시 확인 및 복원
+                    restored = await check_and_restore_nickname(after, user['level'])
+                    if restored:
+                        print(f"[NicknameManager] 닉네임 변경 감지 및 레벨 표시 복원: {after.name} (레벨 {user['level']})")
+            except Exception as e:
+                print(f"[NicknameManager] 닉네임 변경 이벤트 처리 중 오류: {e}")
+    
+    return bot
 

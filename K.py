@@ -24,17 +24,24 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import os
+import asyncio
 
 from message_with_channel_id import message_with_channel_id
 from database import init_database, initialize_all_members, get_user
 from voice_monitor import setup_voice_monitor
-from nickname_manager import setup_nickname_refresh, initial_nickname_update, update_user_nickname
+from nickname_manager import initial_nickname_update, update_user_nickname, setup_nickname_update_event
 from role_manager import initial_tier_role_update, update_tier_role
 from level_system import set_level
 from commands.level_command import level_command
 from commands.rank_command import rank_command
 from commands.admin_command import admin_command
 from commands.market_command import market_command
+from commands.market_admin_command import market_admin_command
+from commands.study_command import study_command
+from commands.voice_channel_command import voice_channel_command
+from commands.level_system_command import level_system_command
+from commands.tier_system_command import tier_system_command
+from commands.reboot_command import reboot_command
 
 load_dotenv()
 
@@ -52,11 +59,49 @@ level_command(k)
 rank_command(k)
 admin_command(k)
 market_command(k)
+market_admin_command(k)
+study_command(k)
+voice_channel_command(k)
+level_system_command(k)
+tier_system_command(k)
+reboot_command(k)
 
 # onEnable
 @k.event
 async def on_ready():
     print(f"Logged in as {k.user}")
+    
+    # voice_channel_exp.txt 파일 초기화 (config.py 설정 마이그레이션)
+    from voice_channel_exp_manager import load_voice_channel_exp, save_voice_channel_exp
+    from config import VOICE_CHANNEL_EXP
+    
+    file_settings = load_voice_channel_exp()
+    # 파일이 비어있고 config.py에 설정이 있으면 마이그레이션
+    if not file_settings and VOICE_CHANNEL_EXP:
+        save_voice_channel_exp(VOICE_CHANNEL_EXP)
+        print(f"[VoiceChannelExp] Migrated {len(VOICE_CHANNEL_EXP)} settings from config.py to voice_channel_exp.txt")
+    
+    # level_ranges.txt 파일 초기화 (config.py 설정 마이그레이션)
+    from level_ranges_manager import load_level_ranges, save_level_ranges, ensure_file
+    from config import _DEFAULT_LEVEL_RANGES
+    
+    ensure_file()  # 파일이 없으면 기본값으로 생성
+    file_level_ranges = load_level_ranges()
+    # 파일이 비어있고 기본값이 있으면 마이그레이션
+    if not file_level_ranges and _DEFAULT_LEVEL_RANGES:
+        save_level_ranges(_DEFAULT_LEVEL_RANGES)
+        print(f"[LevelRanges] Migrated {len(_DEFAULT_LEVEL_RANGES)} level ranges from config.py to level_ranges.txt")
+    
+    # tier_roles.txt 파일 초기화 (config.py 설정 마이그레이션)
+    from tier_roles_manager import load_tier_roles, save_tier_roles, ensure_file as ensure_tier_file
+    from config import _DEFAULT_TIER_ROLES
+    
+    ensure_tier_file()  # 파일이 없으면 기본값으로 생성
+    file_tier_roles = load_tier_roles()
+    # 파일이 비어있고 기본값이 있으면 마이그레이션
+    if not file_tier_roles and _DEFAULT_TIER_ROLES:
+        save_tier_roles(_DEFAULT_TIER_ROLES)
+        print(f"[TierRoles] Migrated {len(_DEFAULT_TIER_ROLES)} tier roles from config.py to tier_roles.txt")
     
     # 데이터베이스 초기화
     await init_database()
@@ -81,9 +126,9 @@ async def on_ready():
     # 처음 실행 시 모든 티어 역할 즉시 업데이트
     await initial_tier_role_update(k)
 
-    # 닉네임 새로고침 백그라운드 작업 시작
-    nickname_refresh_task = setup_nickname_refresh(k)
-    print("[NicknameManager] Nickname refresh task started")
+    # 닉네임 변경 이벤트 핸들러 설정 (이벤트 기반 업데이트)
+    setup_nickname_update_event(k)
+    print("[NicknameManager] Nickname update event handler registered (이벤트 기반)")
     
     print("K 봇이 준비되었습니다!")
 

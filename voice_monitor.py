@@ -1,11 +1,12 @@
 # voice_monitor.py - 음성채널 모니터링 및 exp 획득
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict
 import discord
 
 from config import VOICE_CHANNEL_EXP
+from voice_channel_exp_manager import load_voice_channel_exp
 from database import (
     create_voice_session, end_voice_session,
     update_last_voice_join
@@ -14,6 +15,8 @@ from level_system import add_exp
 from nickname_manager import update_user_nickname
 from role_manager import update_tier_role
 from logger import send_levelup_log, send_tier_upgrade_log
+from warning_system import check_warning_restrictions
+from utils import has_jk_role
 
 
 class VoiceMonitor:
@@ -21,6 +24,7 @@ class VoiceMonitor:
         self.bot = bot
         self.active_sessions: Dict[int, Dict] = {}  # {user_id: {guild_id, channel_id, session_id, join_time, task}}
         self.exp_tasks: Dict[int, asyncio.Task] = {}  # {user_id: task}
+        self.processing_users: set = set()  # 처리 중인 사용자 (재귀 호출 방지)
     
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """음성채널 상태 변경 감지"""
@@ -48,48 +52,102 @@ class VoiceMonitor:
     
     def _get_channel_exp_settings(self, channel_id: int) -> tuple:
         """채널의 EXP 설정 반환 (지급_주기_분, 지급_경험치)"""
+        # 파일에서 먼저 확인 (우선순위)
+        file_settings = load_voice_channel_exp()
+        if channel_id in file_settings:
+            return file_settings[channel_id]
+        
+        # 파일에 없으면 config.py에서 확인 (하위 호환성)
         if channel_id in VOICE_CHANNEL_EXP:
             return VOICE_CHANNEL_EXP[channel_id]
+        
         return None  # 설정되지 않은 채널
     
     async def _handle_voice_join(self, member: discord.Member, channel: discord.VoiceChannel, guild_id: int, user_id: int, silent: bool = False):
         """음성채널 입장 처리"""
-        # 이미 세션이 있으면 무시 (이동인 경우)
-        if user_id in self.active_sessions:
+        # 처리 중인 사용자는 무시 (재귀 호출 방지)
+        if user_id in self.processing_users:
             return
         
-        # 채널이 EXP 지급 채널인지 확인
-        exp_settings = self._get_channel_exp_settings(channel.id)
-        if exp_settings is None:
+        # 처리 시작 플래그 설정
+        self.processing_users.add(user_id)
+        
+        try:
+            # 이미 세션이 있으면 이전 세션 종료 (채널 이동 시 새로 시작)
+            if user_id in self.active_sessions:
+                # 이전 세션 정리
+                old_session = self.active_sessions[user_id]
+                old_channel_id = old_session['channel_id']
+                old_channel = member.guild.get_channel(old_channel_id)
+                if old_channel:
+                    await self._handle_voice_leave(member, old_channel, guild_id, user_id)
+            
+            # JK 역할을 가진 사용자는 제한 없음
+            user_has_jk = has_jk_role(member)
+            
+            # 경고 체크 (JK 권한이 없을 때만)
+            if not user_has_jk:
+                restrictions = await check_warning_restrictions(user_id, guild_id)
+                if not restrictions['can_use_voice']:
+                    # 음성 채널에서 강제로 퇴장
+                    try:
+                        await member.move_to(None, reason=f"경고 {restrictions['warning_count']}회로 음성 채팅방 이용 불가")
+                        if not silent:
+                            await channel.send(
+                                f"{member.mention} 경고 7회 이상으로 음성 채팅방을 이용할 수 없습니다. (현재 경고: {restrictions['warning_count']}회)",
+                                delete_after=10
+                            )
+                    except discord.Forbidden:
+                        if not silent:
+                            print(f"[VoiceMonitor] {member.name}는 경고 {restrictions['warning_count']}회로 음성 채팅방 이용 불가 (강제 퇴장 권한 없음)")
+                    except Exception as e:
+                        print(f"[VoiceMonitor] 음성 채널 강제 퇴장 중 오류: {e}")
+                    finally:
+                        # 강제 퇴장 후 플래그 제거 (퇴장 이벤트가 처리될 시간 확보)
+                        async def remove_flag():
+                            await asyncio.sleep(0.5)  # 0.5초 딜레이
+                            self.processing_users.discard(user_id)
+                        asyncio.create_task(remove_flag())
+                    return
+        
+            # 채널이 EXP 지급 채널인지 확인
+            exp_settings = self._get_channel_exp_settings(channel.id)
+            if exp_settings is None:
+                if not silent:
+                    print(f"[VoiceMonitor] {member.name} joined voice channel {channel.name} (EXP 지급 채널 아님)")
+                return
+            
+            # 사용자 데이터가 없으면 생성 (처음 입장하는 사용자)
+            from database import get_or_create_user
+            await get_or_create_user(user_id, guild_id)
+            
+            # 세션 생성
+            session_id = await create_voice_session(user_id, guild_id, channel.id)
+            await update_last_voice_join(user_id, guild_id)
+            
+            # 세션 정보 저장
+            self.active_sessions[user_id] = {
+                'guild_id': guild_id,
+                'channel_id': channel.id,
+                'session_id': session_id,
+                'join_time': datetime.now(),
+                'member': member,
+                'exp_interval': exp_settings[0],  # 지급 주기 (분)
+                'exp_amount': exp_settings[1]     # 지급 경험치
+            }
+            
+            # exp 누적 작업 시작
+            task = asyncio.create_task(self._accumulate_exp(user_id, guild_id, member))
+            self.exp_tasks[user_id] = task
+            
             if not silent:
-                print(f"[VoiceMonitor] {member.name} joined voice channel {channel.name} (EXP 지급 채널 아님)")
-            return
+                print(f"[VoiceMonitor] {member.name} joined voice channel {channel.name} in {member.guild.name} (EXP 설정: {exp_settings[0]}분마다 {exp_settings[1]} exp)")
         
-        # 사용자 데이터가 없으면 생성 (처음 입장하는 사용자)
-        from database import get_or_create_user
-        await get_or_create_user(user_id, guild_id)
-        
-        # 세션 생성
-        session_id = await create_voice_session(user_id, guild_id, channel.id)
-        await update_last_voice_join(user_id, guild_id)
-        
-        # 세션 정보 저장
-        self.active_sessions[user_id] = {
-            'guild_id': guild_id,
-            'channel_id': channel.id,
-            'session_id': session_id,
-            'join_time': datetime.now(),
-            'member': member,
-            'exp_interval': exp_settings[0],  # 지급 주기 (분)
-            'exp_amount': exp_settings[1]     # 지급 경험치
-        }
-        
-        # exp 누적 작업 시작
-        task = asyncio.create_task(self._accumulate_exp(user_id, guild_id, member))
-        self.exp_tasks[user_id] = task
-        
-        if not silent:
-            print(f"[VoiceMonitor] {member.name} joined voice channel {channel.name} in {member.guild.name} (EXP 설정: {exp_settings[0]}분마다 {exp_settings[1]} exp)")
+        finally:
+            # 정상 처리 완료 시 플래그 제거 (강제 퇴장이 아닌 경우)
+            # 강제 퇴장은 위에서 이미 처리됨
+            if user_id in self.processing_users:
+                self.processing_users.discard(user_id)
     
     async def _handle_voice_leave(self, member: discord.Member, channel: discord.VoiceChannel, guild_id: int, user_id: int):
         """음성채널 퇴장 처리"""
@@ -99,33 +157,28 @@ class VoiceMonitor:
         session_info = self.active_sessions[user_id]
         session_id = session_info['session_id']
         
-        # exp 누적 작업 중지
+        # exp 누적 작업 중지 (취소 후 완료 대기)
         if user_id in self.exp_tasks:
             task = self.exp_tasks[user_id]
             task.cancel()
+            # 작업이 완전히 취소될 때까지 대기 (중복 EXP 지급 방지)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
             del self.exp_tasks[user_id]
         
-        # 세션 종료 시간 계산 (채널별 설정 사용)
-        join_time = session_info['join_time']
-        duration = datetime.now() - join_time
-        minutes = duration.total_seconds() / 60
-        
-        # 채널별 EXP 설정 사용
-        exp_settings = self._get_channel_exp_settings(channel.id)
-        if exp_settings:
-            exp_interval = exp_settings[0]  # 지급 주기 (분)
-            exp_amount = exp_settings[1]     # 지급 경험치
-            # 지급 주기 단위로 계산
-            exp_earned = int(minutes / exp_interval) * exp_amount
-        else:
-            # 설정되지 않은 채널 (이론적으로는 여기 도달하지 않아야 함)
-            exp_earned = 0
+        # 세션 종료 (보정 지급 없음 - 지급 주기를 채우지 않고 퇴장하면 0exp)
+        exp_earned = 0
         
         # 세션 종료 기록
         await end_voice_session(session_id, exp_earned)
         
         # 세션 정보 제거
         del self.active_sessions[user_id]
+        
+        # 처리 중 플래그 제거 (퇴장 시)
+        self.processing_users.discard(user_id)
         
         print(f"[VoiceMonitor] {member.name} left voice channel {channel.name} in {member.guild.name} (earned {exp_earned} exp)")
     
@@ -157,17 +210,9 @@ class VoiceMonitor:
                 # 현재 채널이 여전히 EXP 지급 채널인지 확인
                 current_channel_id = member.voice.channel.id
                 if current_channel_id != session_info['channel_id']:
-                    # 채널이 변경되었으면 새 채널 설정 확인
-                    new_exp_settings = self._get_channel_exp_settings(current_channel_id)
-                    if new_exp_settings is None:
-                        break
-                    # 새 채널 설정으로 업데이트
-                    session_info['channel_id'] = current_channel_id
-                    session_info['exp_interval'] = new_exp_settings[0]
-                    session_info['exp_amount'] = new_exp_settings[1]
-                    exp_interval = new_exp_settings[0]
-                    exp_amount = new_exp_settings[1]
-                    check_interval = exp_interval * 60
+                    # 채널이 변경되었으면 현재 세션 종료하고 새로운 세션 시작
+                    # (이 경우 on_voice_state_update가 호출되어 새 세션이 시작됨)
+                    break
                 
                 # 시간 체크: 06:00 ~ 23:59 사이만 경험치 지급
                 current_time = datetime.now()
@@ -176,33 +221,57 @@ class VoiceMonitor:
                     # 경험치 지급 시간이 아니면 스킵 (다음 체크까지 대기)
                     continue
                 
-                # exp 추가
-                result = await add_exp(user_id, guild_id, exp_amount)
+                # exp 추가 (트랜잭션 모드)
+                result = await add_exp(user_id, guild_id, exp_amount, use_transaction=True)
+                db = result.get('db')
                 
                 # 레벨업 시 닉네임 업데이트, 역할 업데이트 및 로그 전송
                 if result['leveled_up']:
-                    await update_user_nickname(member, result['new_level'])
-                    success, old_tier, new_tier = await update_tier_role(member, result['new_level'])
-                    
-                    # 티어 업그레이드 축하 메시지 전송
-                    if success and old_tier and new_tier and old_tier != new_tier:
-                        await send_tier_upgrade_log(self.bot, member, old_tier, new_tier, result['new_level'])
-                    
-                    # 음성채널 이름 가져오기
-                    channel_name = "알 수 없음"
-                    if member.voice and member.voice.channel:
-                        channel_name = member.voice.channel.name
-                    
-                    await send_levelup_log(
-                        self.bot,
-                        member,
-                        result['old_level'],
-                        result['new_level'],
-                        result['points_earned'],
-                        result['new_points'],
-                        f"🎤 {channel_name}"
-                    )
-                    print(f"[VoiceMonitor] {member.name} leveled up to {result['new_level']}!")
+                    try:
+                        # Discord API 호출 시도
+                        nickname_success = await update_user_nickname(member, result['new_level'])
+                        role_success, old_tier, new_tier = await update_tier_role(member, result['new_level'])
+                        
+                        # 모든 작업 성공 시 커밋
+                        if db:
+                            await db.commit()
+                            await db.close()
+                        
+                        # 티어 업그레이드 축하 메시지 전송
+                        if role_success and old_tier and new_tier and old_tier != new_tier:
+                            await send_tier_upgrade_log(self.bot, member, old_tier, new_tier, result['new_level'])
+                        
+                        # 음성채널 이름 가져오기
+                        channel_name = "알 수 없음"
+                        if member.voice and member.voice.channel:
+                            channel_name = member.voice.channel.name
+                        
+                        await send_levelup_log(
+                            self.bot,
+                            member,
+                            result['old_level'],
+                            result['new_level'],
+                            result['points_earned'],
+                            result['new_points'],
+                            f"🎤 {channel_name}"
+                        )
+                        print(f"[VoiceMonitor] {member.name} leveled up to {result['new_level']}!")
+                        
+                    except Exception as e:
+                        # Discord API 실패 시 DB 롤백
+                        if db:
+                            try:
+                                await db.rollback()
+                                await db.close()
+                                print(f"[VoiceMonitor] 레벨업 실패로 DB 롤백: {member.name} - {e}")
+                            except Exception as rollback_error:
+                                print(f"[VoiceMonitor] 롤백 중 오류: {rollback_error}")
+                        raise e
+                else:
+                    # 레벨업 없으면 즉시 커밋
+                    if db:
+                        await db.commit()
+                        await db.close()
                 
         except asyncio.CancelledError:
             # 작업이 취소되었을 때 (퇴장 시)

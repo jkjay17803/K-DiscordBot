@@ -46,6 +46,58 @@ async def init_database():
             )
         """)
         
+        # warnings 테이블
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS warnings (
+                warning_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                reason TEXT,
+                issued_at TIMESTAMP NOT NULL,
+                issued_by INTEGER NOT NULL,
+                expires_at TIMESTAMP NOT NULL
+            )
+        """)
+        
+        # 인덱스 생성 (기존 인덱스가 있으면 무시됨)
+        # users 테이블: guild_id로 조회 최적화
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_users_guild_id ON users(guild_id)
+        """)
+        
+        # warnings 테이블: 만료 시간 조회 최적화
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_warnings_expires ON warnings(expires_at)
+        """)
+        
+        # warnings 테이블: 사용자별 경고 조회 최적화
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_warnings_user_guild ON warnings(user_id, guild_id)
+        """)
+        
+        # server_fees 테이블 (서버비 기록)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS server_fees (
+                fee_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                guild_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                transaction_type TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                created_by INTEGER NOT NULL
+            )
+        """)
+        
+        # server_fees 테이블 인덱스
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_server_fees_guild_id ON server_fees(guild_id)
+        """)
+        
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_server_fees_created_at ON server_fees(created_at)
+        """)
+        
         await db.commit()
 
 
@@ -85,26 +137,42 @@ async def get_or_create_user(user_id: int, guild_id: int) -> dict:
     return user
 
 
-async def update_user_exp(user_id: int, guild_id: int, exp: int, total_exp: int):
+async def update_user_exp(user_id: int, guild_id: int, exp: int, total_exp: int, db=None):
     """사용자 exp 업데이트"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    if db is None:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE users SET exp = ?, total_exp = ? WHERE user_id = ? AND guild_id = ?",
+                (exp, total_exp, user_id, guild_id)
+            )
+            await db.commit()
+    else:
+        # 트랜잭션 내에서 실행
         await db.execute(
             "UPDATE users SET exp = ?, total_exp = ? WHERE user_id = ? AND guild_id = ?",
             (exp, total_exp, user_id, guild_id)
         )
-        await db.commit()
 
 
-async def update_user_level(user_id: int, guild_id: int, level: int, exp: int, points: int, total_exp: int):
+async def update_user_level(user_id: int, guild_id: int, level: int, exp: int, points: int, total_exp: int, db=None):
     """사용자 레벨, exp, 포인트, 총 exp 업데이트"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    if db is None:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """UPDATE users 
+                   SET level = ?, exp = ?, points = ?, total_exp = ?
+                   WHERE user_id = ? AND guild_id = ?""",
+                (level, exp, points, total_exp, user_id, guild_id)
+            )
+            await db.commit()
+    else:
+        # 트랜잭션 내에서 실행
         await db.execute(
             """UPDATE users 
                SET level = ?, exp = ?, points = ?, total_exp = ?
                WHERE user_id = ? AND guild_id = ?""",
             (level, exp, points, total_exp, user_id, guild_id)
         )
-        await db.commit()
 
 
 async def update_user_points(user_id: int, guild_id: int, points: int):
@@ -314,4 +382,137 @@ async def set_market_enabled(guild_id: int, enabled: bool):
             (guild_id, 1 if enabled else 0)
         )
         await db.commit()
+
+
+# ========== 경고 시스템 함수들 ==========
+
+async def add_warning(user_id: int, guild_id: int, reason: str, issued_by: int, warning_count: int = 1):
+    """경고 추가"""
+    from datetime import timedelta
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        issued_at = datetime.now()
+        expires_at = issued_at + timedelta(days=7)
+        
+        for _ in range(warning_count):
+            await db.execute(
+                """INSERT INTO warnings (user_id, guild_id, reason, issued_at, issued_by, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, guild_id, reason, issued_at.isoformat(), issued_by, expires_at.isoformat())
+            )
+        
+        await db.commit()
+
+
+async def get_active_warning_count(user_id: int, guild_id: int) -> int:
+    """활성 경고 수 조회 (모든 경고 - 자동 만료 없음)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT COUNT(*) as count
+               FROM warnings
+               WHERE user_id = ? AND guild_id = ?""",
+            (user_id, guild_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def get_all_warnings(user_id: int, guild_id: int) -> List[dict]:
+    """사용자의 모든 경고 조회"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT warning_id, reason, issued_at, issued_by, expires_at
+               FROM warnings
+               WHERE user_id = ? AND guild_id = ?
+               ORDER BY issued_at DESC""",
+            (user_id, guild_id)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def remove_expired_warnings():
+    """만료된 경고 삭제 (7일이 지난 경고)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """DELETE FROM warnings
+               WHERE expires_at <= ?""",
+            (datetime.now().isoformat(),)
+        )
+        await db.commit()
+        return cursor.rowcount
+
+
+async def remove_warnings(user_id: int, guild_id: int, count: int) -> int:
+    """활성 경고 삭제 (가장 오래된 경고부터 삭제) - 자동 만료 없음"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # 가장 오래된 경고부터 삭제
+        cursor = await db.execute(
+            """DELETE FROM warnings
+               WHERE warning_id IN (
+                   SELECT warning_id FROM warnings
+                   WHERE user_id = ? AND guild_id = ?
+                   ORDER BY issued_at ASC
+                   LIMIT ?
+               )""",
+            (user_id, guild_id, count)
+        )
+        await db.commit()
+        return cursor.rowcount
+
+
+# ========== 서버비 시스템 함수들 ==========
+
+async def add_server_fee(user_id: Optional[int], guild_id: int, amount: int, reason: str, created_by: int):
+    """서버비 추가 기록"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO server_fees (user_id, guild_id, amount, reason, transaction_type, created_at, created_by)
+               VALUES (?, ?, ?, ?, 'add', ?, ?)""",
+            (user_id, guild_id, amount, reason, datetime.now().isoformat(), created_by)
+        )
+        await db.commit()
+
+
+async def remove_server_fee(guild_id: int, amount: int, reason: str, created_by: int):
+    """서버비 사용 기록"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO server_fees (user_id, guild_id, amount, reason, transaction_type, created_at, created_by)
+               VALUES (NULL, ?, ?, ?, 'remove', ?, ?)""",
+            (guild_id, amount, reason, datetime.now().isoformat(), created_by)
+        )
+        await db.commit()
+
+
+async def get_server_fee_balance(guild_id: int) -> int:
+    """서버비 잔액 조회 (추가된 금액 - 사용된 금액)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT 
+                   COALESCE(SUM(CASE WHEN transaction_type = 'add' THEN amount ELSE 0 END), 0) -
+                   COALESCE(SUM(CASE WHEN transaction_type = 'remove' THEN amount ELSE 0 END), 0) as balance
+               FROM server_fees
+               WHERE guild_id = ?""",
+            (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def get_server_fee_history(guild_id: int, limit: int = 20) -> List[dict]:
+    """서버비 기록 조회 (최근 기록부터)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT fee_id, user_id, amount, reason, transaction_type, created_at, created_by
+               FROM server_fees
+               WHERE guild_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (guild_id, limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 

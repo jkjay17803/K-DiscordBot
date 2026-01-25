@@ -2,7 +2,7 @@
 
 import asyncio
 import discord
-from config import TIER_ROLES
+from config import get_tier_roles
 from database import get_all_users_for_nickname_refresh
 
 
@@ -11,8 +11,9 @@ def get_tier_for_level(level: int) -> tuple[str, str] | None:
     레벨에 해당하는 티어 정보 반환
     Returns: (티어_이름, 역할_이름) 또는 None
     """
+    tier_roles = get_tier_roles()  # 동적으로 로드
     # 레벨이 높은 순서대로 정렬 (가장 높은 티어부터 확인)
-    sorted_tiers = sorted(TIER_ROLES.items(), key=lambda x: x[1][0], reverse=True)
+    sorted_tiers = sorted(tier_roles.items(), key=lambda x: x[1][0], reverse=True)
     
     for tier_name, (required_level, role_name) in sorted_tiers:
         if level >= required_level:
@@ -53,7 +54,8 @@ async def update_tier_role(member: discord.Member, level: int) -> tuple[bool, st
         has_target_role = target_role in member.roles
         
         # 모든 티어 역할 목록 가져오기
-        all_tier_role_names = [role_name for _, (_, role_name) in TIER_ROLES.items()]
+        tier_roles = get_tier_roles()  # 동적으로 로드
+        all_tier_role_names = [role_name for _, (_, role_name) in tier_roles.items()]
         all_tier_roles = [discord.utils.get(member.guild.roles, name=role_name) 
                          for role_name in all_tier_role_names]
         all_tier_roles = [role for role in all_tier_roles if role is not None]
@@ -66,7 +68,7 @@ async def update_tier_role(member: discord.Member, level: int) -> tuple[bool, st
         if user_tier_roles:
             # 사용자가 가지고 있는 티어 역할의 이름으로 이전 티어 찾기
             old_role_name = user_tier_roles[0].name
-            for tier_key, (_, role_name) in TIER_ROLES.items():
+            for tier_key, (_, role_name) in tier_roles.items():
                 if role_name == old_role_name:
                     old_tier_name = tier_key
                     break
@@ -116,7 +118,8 @@ async def remove_all_tier_roles(member: discord.Member) -> bool:
     """
     try:
         # 모든 티어 역할 목록 가져오기
-        all_tier_role_names = [role_name for _, (_, role_name) in TIER_ROLES.items()]
+        tier_roles = get_tier_roles()  # 동적으로 로드
+        all_tier_role_names = [role_name for _, (_, role_name) in tier_roles.items()]
         all_tier_roles = [discord.utils.get(member.guild.roles, name=role_name) 
                          for role_name in all_tier_role_names]
         all_tier_roles = [role for role in all_tier_roles if role is not None]

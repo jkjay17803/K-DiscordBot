@@ -2,7 +2,7 @@
 
 import discord
 from datetime import datetime
-from config import LOG_CHANNEL_ID_JK, LOG_CHANNEL_ID_LEVEL, LOG_CHANNEL_ID_MARKET, TIER_CONGRATULATION_CHANNEL_ID
+from config import LOG_CHANNEL_ID_JK, LOG_CHANNEL_ID_LEVEL, LOG_CHANNEL_ID_MARKET, TIER_CONGRATULATION_CHANNEL_ID, LOG_WARNING_CHANNEL_ID
 
 
 async def send_command_log(bot, executor: discord.Member, command: str, target_user: discord.Member = None, details: str = ""):
@@ -226,3 +226,87 @@ async def send_tier_upgrade_log(bot, user: discord.Member, old_tier: str, new_ti
         await channel.send(embed=embed)
     except Exception as e:
         print(f"[Logger] 티어 업그레이드 축하 메시지 전송 실패: {e}")
+
+
+async def send_warning_log(bot, executor: discord.Member, target_user: discord.Member, warning_count: int, reason: str, total_warnings: int, points_deducted: int, new_points: int):
+    """
+    경고 부여 로그 전송
+    """
+    if LOG_WARNING_CHANNEL_ID is None:
+        return
+    
+    try:
+        channel = bot.get_channel(LOG_WARNING_CHANNEL_ID)
+        if channel is None:
+            print(f"[Logger] 경고 로그 채널을 찾을 수 없습니다. (ID: {LOG_WARNING_CHANNEL_ID})")
+            return
+        
+        embed = discord.Embed(
+            title="⚠️ 경고 부여 로그",
+            color=discord.Color.orange(),
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(
+            name="실행자",
+            value=f"{executor.display_name} ({executor.mention})\nID: {executor.id}",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="대상 사용자",
+            value=f"{target_user.display_name} ({target_user.mention})\nID: {target_user.id}",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="부여된 경고",
+            value=f"**{warning_count}개**",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="총 경고 수",
+            value=f"**{total_warnings}개**",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="사유",
+            value=reason if reason else "사유 없음",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="포인트 차감",
+            value=f"**-{points_deducted:,}** 포인트",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="차감 후 포인트",
+            value=f"**{new_points:,}** 포인트",
+            inline=True
+        )
+        
+        # 경고 수에 따른 제한 사항 표시
+        restrictions = []
+        if total_warnings >= 3:
+            restrictions.append("❌ 메시지 보내기 불가능")
+        if total_warnings >= 5:
+            restrictions.append("❌ 마켓 이용 불가능")
+        if total_warnings >= 7:
+            restrictions.append("❌ 음성 채팅방 이용 불가능")
+        if total_warnings >= 10:
+            restrictions.append("🚫 임시 차단")
+        
+        if restrictions:
+            embed.add_field(
+                name="적용된 제한",
+                value="\n".join(restrictions),
+                inline=False
+            )
+        
+        await channel.send(embed=embed)
+    except Exception as e:
+        print(f"[Logger] 경고 로그 전송 실패: {e}")

@@ -2,10 +2,12 @@
 
 import discord
 from discord.ext import commands
+from warning_system import check_warning_restrictions
+from utils import has_jk_role
 
 def check_jk():
     async def predicate(ctx):
-        return any(role.name == "JK" for role in ctx.author.roles)
+        return has_jk_role(ctx.author)
     return commands.check(predicate)
 
 
@@ -37,3 +39,40 @@ def message_with_channel_id(k):
     async def send_message_error(ctx, error):
         if isinstance(error, commands.CheckFailure):
             await ctx.send("알 수 없는 오류")
+
+    # 메시지 전송 제한 (경고 3회 이상)
+    @k.event
+    async def on_message(message):
+        # 봇 메시지는 무시
+        if message.author.bot:
+            await k.process_commands(message)
+            return
+        
+        # 명령어는 처리되도록 함 (명령어는 제한 없음)
+        if message.content.startswith('!'):
+            await k.process_commands(message)
+            return
+        
+        # JK 역할을 가진 사용자는 제한 없음
+        if has_jk_role(message.author):
+            await k.process_commands(message)
+            return
+        
+        # 경고 체크
+        restrictions = await check_warning_restrictions(message.author.id, message.guild.id)
+        
+        if not restrictions['can_send_messages']:
+            try:
+                await message.delete()
+                await message.channel.send(
+                    f"{message.author.mention} 경고 3회 이상으로 메시지를 보낼 수 없습니다. (현재 경고: {restrictions['warning_count']}회)",
+                    delete_after=5
+                )
+            except discord.Forbidden:
+                # 메시지 삭제 권한이 없으면 무시
+                pass
+            except Exception as e:
+                print(f"[WarningSystem] 메시지 삭제 중 오류: {e}")
+        
+        # 명령어 처리 (경고 체크 후에도 명령어는 처리되어야 함)
+        await k.process_commands(message)

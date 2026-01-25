@@ -1,0 +1,6 @@
+골드:40:Gold
+다이아:110:Diamond
+루비:150:Ruby
+브론즈:0:Bronze
+실버:20:Silver
+플레티넘:80:Platinum
