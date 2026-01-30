@@ -5,11 +5,13 @@ from datetime import datetime
 from typing import Optional, List
 
 DB_PATH = "k_bot.db"
+DB_TIMEOUT = 30  # 잠금 시 대기 초 (database is locked 방지)
 
 
 async def init_database():
     """데이터베이스 초기화 및 테이블 생성"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
+        await db.execute("PRAGMA journal_mode=WAL")  # 동시 접근 시 잠금 완화
         # users 테이블
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -103,7 +105,7 @@ async def init_database():
 
 async def get_user(user_id: int, guild_id: int) -> Optional[dict]:
     """사용자 데이터 조회"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM users WHERE user_id = ? AND guild_id = ?",
@@ -117,7 +119,7 @@ async def get_user(user_id: int, guild_id: int) -> Optional[dict]:
 
 async def create_user(user_id: int, guild_id: int) -> dict:
     """새 사용자 생성"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             """INSERT INTO users 
                (user_id, guild_id, level, exp, points, total_exp, last_nickname_update)
@@ -140,7 +142,7 @@ async def get_or_create_user(user_id: int, guild_id: int) -> dict:
 async def update_user_exp(user_id: int, guild_id: int, exp: int, total_exp: int, db=None):
     """사용자 exp 업데이트"""
     if db is None:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
             await db.execute(
                 "UPDATE users SET exp = ?, total_exp = ? WHERE user_id = ? AND guild_id = ?",
                 (exp, total_exp, user_id, guild_id)
@@ -157,7 +159,7 @@ async def update_user_exp(user_id: int, guild_id: int, exp: int, total_exp: int,
 async def update_user_level(user_id: int, guild_id: int, level: int, exp: int, points: int, total_exp: int, db=None):
     """사용자 레벨, exp, 포인트, 총 exp 업데이트"""
     if db is None:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
             await db.execute(
                 """UPDATE users 
                    SET level = ?, exp = ?, points = ?, total_exp = ?
@@ -177,7 +179,7 @@ async def update_user_level(user_id: int, guild_id: int, level: int, exp: int, p
 
 async def update_user_points(user_id: int, guild_id: int, points: int):
     """사용자 포인트 업데이트"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             "UPDATE users SET points = ? WHERE user_id = ? AND guild_id = ?",
             (points, user_id, guild_id)
@@ -187,7 +189,7 @@ async def update_user_points(user_id: int, guild_id: int, points: int):
 
 async def update_last_voice_join(user_id: int, guild_id: int):
     """마지막 음성채널 입장 시간 업데이트"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             "UPDATE users SET last_voice_join = ? WHERE user_id = ? AND guild_id = ?",
             (datetime.now().isoformat(), user_id, guild_id)
@@ -197,7 +199,7 @@ async def update_last_voice_join(user_id: int, guild_id: int):
 
 async def update_last_nickname_update(user_id: int, guild_id: int):
     """마지막 닉네임 업데이트 시간 기록"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             "UPDATE users SET last_nickname_update = ? WHERE user_id = ? AND guild_id = ?",
             (datetime.now().isoformat(), user_id, guild_id)
@@ -207,7 +209,7 @@ async def update_last_nickname_update(user_id: int, guild_id: int):
 
 async def create_voice_session(user_id: int, guild_id: int, channel_id: int) -> int:
     """음성 세션 생성"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         cursor = await db.execute(
             """INSERT INTO voice_sessions (user_id, guild_id, channel_id, join_time)
                VALUES (?, ?, ?, ?)""",
@@ -219,7 +221,7 @@ async def create_voice_session(user_id: int, guild_id: int, channel_id: int) -> 
 
 async def end_voice_session(session_id: int, exp_earned: int):
     """음성 세션 종료"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             """UPDATE voice_sessions 
                SET leave_time = ?, exp_earned = ?
@@ -231,7 +233,7 @@ async def end_voice_session(session_id: int, exp_earned: int):
 
 async def get_leaderboard_by_points(guild_id: int, limit: int = 10) -> List[dict]:
     """포인트 기준 리더보드"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT user_id, level, exp, points, total_exp
@@ -247,7 +249,7 @@ async def get_leaderboard_by_points(guild_id: int, limit: int = 10) -> List[dict
 
 async def get_leaderboard_by_level(guild_id: int, limit: int = 10) -> List[dict]:
     """레벨 기준 리더보드"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT user_id, level, exp, points, total_exp
@@ -263,7 +265,7 @@ async def get_leaderboard_by_level(guild_id: int, limit: int = 10) -> List[dict]
 
 async def get_user_rank_by_points(user_id: int, guild_id: int) -> int:
     """사용자의 포인트 기준 순위"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         async with db.execute(
             """SELECT COUNT(*) + 1 as rank
                FROM users
@@ -284,7 +286,7 @@ async def get_user_rank_by_points(user_id: int, guild_id: int) -> int:
 
 async def get_user_rank_by_level(user_id: int, guild_id: int) -> int:
     """사용자의 레벨 기준 순위"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         async with db.execute(
             """SELECT COUNT(*) + 1 as rank
                FROM users
@@ -305,7 +307,7 @@ async def get_user_rank_by_level(user_id: int, guild_id: int) -> int:
 
 async def get_all_users_for_nickname_refresh(guild_id: Optional[int] = None) -> List[dict]:
     """닉네임 새로고침을 위한 모든 사용자 조회"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         db.row_factory = aiosqlite.Row
         if guild_id:
             async with db.execute(
@@ -330,7 +332,7 @@ async def initialize_all_members(guilds) -> dict:
     created = 0
     skipped = 0
     
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         for guild in guilds:
             if guild is None:
                 continue
@@ -360,7 +362,7 @@ async def initialize_all_members(guilds) -> dict:
 
 async def get_market_enabled(guild_id: int) -> bool:
     """마켓 활성화 상태 조회 (기본값: True)"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         async with db.execute(
             "SELECT market_enabled FROM guild_settings WHERE guild_id = ?",
             (guild_id,)
@@ -375,7 +377,7 @@ async def get_market_enabled(guild_id: int) -> bool:
 
 async def set_market_enabled(guild_id: int, enabled: bool):
     """마켓 활성화 상태 설정"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             """INSERT OR REPLACE INTO guild_settings (guild_id, market_enabled)
                VALUES (?, ?)""",
@@ -390,7 +392,7 @@ async def add_warning(user_id: int, guild_id: int, reason: str, issued_by: int, 
     """경고 추가"""
     from datetime import timedelta
     
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         issued_at = datetime.now()
         expires_at = issued_at + timedelta(days=7)
         
@@ -406,7 +408,7 @@ async def add_warning(user_id: int, guild_id: int, reason: str, issued_by: int, 
 
 async def get_active_warning_count(user_id: int, guild_id: int) -> int:
     """활성 경고 수 조회 (모든 경고 - 자동 만료 없음)"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         async with db.execute(
             """SELECT COUNT(*) as count
                FROM warnings
@@ -419,7 +421,7 @@ async def get_active_warning_count(user_id: int, guild_id: int) -> int:
 
 async def get_all_warnings(user_id: int, guild_id: int) -> List[dict]:
     """사용자의 모든 경고 조회"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT warning_id, reason, issued_at, issued_by, expires_at
@@ -434,7 +436,7 @@ async def get_all_warnings(user_id: int, guild_id: int) -> List[dict]:
 
 async def remove_expired_warnings():
     """만료된 경고 삭제 (7일이 지난 경고)"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         cursor = await db.execute(
             """DELETE FROM warnings
                WHERE expires_at <= ?""",
@@ -446,7 +448,7 @@ async def remove_expired_warnings():
 
 async def remove_warnings(user_id: int, guild_id: int, count: int) -> int:
     """활성 경고 삭제 (가장 오래된 경고부터 삭제) - 자동 만료 없음"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         # 가장 오래된 경고부터 삭제
         cursor = await db.execute(
             """DELETE FROM warnings
@@ -466,7 +468,7 @@ async def remove_warnings(user_id: int, guild_id: int, count: int) -> int:
 
 async def add_server_fee(user_id: Optional[int], guild_id: int, amount: int, reason: str, created_by: int):
     """서버비 추가 기록"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             """INSERT INTO server_fees (user_id, guild_id, amount, reason, transaction_type, created_at, created_by)
                VALUES (?, ?, ?, ?, 'add', ?, ?)""",
@@ -477,7 +479,7 @@ async def add_server_fee(user_id: Optional[int], guild_id: int, amount: int, rea
 
 async def remove_server_fee(guild_id: int, amount: int, reason: str, created_by: int):
     """서버비 사용 기록"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         await db.execute(
             """INSERT INTO server_fees (user_id, guild_id, amount, reason, transaction_type, created_at, created_by)
                VALUES (NULL, ?, ?, ?, 'remove', ?, ?)""",
@@ -488,7 +490,7 @@ async def remove_server_fee(guild_id: int, amount: int, reason: str, created_by:
 
 async def get_server_fee_balance(guild_id: int) -> int:
     """서버비 잔액 조회 (추가된 금액 - 사용된 금액)"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         async with db.execute(
             """SELECT 
                    COALESCE(SUM(CASE WHEN transaction_type = 'add' THEN amount ELSE 0 END), 0) -
@@ -503,7 +505,7 @@ async def get_server_fee_balance(guild_id: int) -> int:
 
 async def get_server_fee_history(guild_id: int, limit: int = 20) -> List[dict]:
     """서버비 기록 조회 (최근 기록부터)"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT fee_id, user_id, amount, reason, transaction_type, created_at, created_by

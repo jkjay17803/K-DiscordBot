@@ -2,7 +2,7 @@
 
 import discord
 from discord.ext import commands
-from database import get_user, update_user_points
+from database import get_user, get_or_create_user, update_user_points
 from market_manager import (
     get_all_market_items, find_item_by_code, purchase_ticket,
     ensure_market_dir, get_user_purchase_history
@@ -153,17 +153,17 @@ def market_command(k):
             await ctx.send(f"❌ `{item.name}`은(는) 품절되었습니다.")
             return
         
-        # 사용자 정보 조회
+        # 사용자 정보 조회 (없으면 생성하여 포인트 0으로 처리)
         user_id = ctx.author.id
         guild_id = ctx.guild.id
-        user = await get_user(user_id, guild_id)
+        user = await get_or_create_user(user_id, guild_id)
         
-        if user is None:
-            await ctx.send("❌ 사용자 정보를 찾을 수 없습니다.")
-            return
-        
-        user_name = ctx.author.display_name
-        user_points = user['points']
+        # points가 NULL/문자열이면 0으로 처리 (DB 레거시/예외 방지)
+        user_name = ctx.author.display_name or str(ctx.author)
+        try:
+            user_points = int(user.get("points") or 0)
+        except (TypeError, ValueError):
+            user_points = 0
         
         # 구매 가능 수 확인
         if item.is_role:
@@ -382,7 +382,10 @@ class PurchaseConfirmView(discord.ui.View):
             await interaction.response.send_message("❌ 사용자 정보를 찾을 수 없습니다.", ephemeral=True)
             return
         
-        current_points = user['points']
+        try:
+            current_points = int(user.get('points') or 0)
+        except (TypeError, ValueError):
+            current_points = 0
         if current_points < self.price:
             await interaction.response.send_message(
                 f"❌ 포인트가 부족합니다.\n필요: {self.price:,}, 보유: {current_points:,}",

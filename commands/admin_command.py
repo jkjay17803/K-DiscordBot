@@ -201,7 +201,7 @@ def admin_command(k):
     async def jk_level_group(ctx):
         """JK 레벨 관리 명령어 그룹"""
         if ctx.invoked_subcommand is None:
-            await ctx.send("❌ 사용법: `!jk레벨 add [사용자ID] [레벨수]` 또는 `!jk레벨 set [사용자ID] [레벨]`")
+            await ctx.send("❌ 사용법: `!jk레벨 add [사용자ID] [레벨수]` 또는 `!jk레벨 set [사용자ID] [레벨]` 또는 `!jk레벨 set [사용자ID] [레벨] 포인트`")
 
     @jk_level_group.command(name="add")
     @check_jk()
@@ -272,10 +272,14 @@ def admin_command(k):
 
     @jk_level_group.command(name="set")
     @check_jk()
-    async def set_level_command(ctx, user_id_input = None, target_level: int = None):
-        """레벨 설정"""
+    async def set_level_command(ctx, user_id_input=None, target_level: int = None, opt: str = None):
+        """레벨 설정 (opt에 '포인트' 입력 시 낮은→높은 레벨일 때만 해당 구간 레벨업 포인트 지급)"""
         if user_id_input is None or target_level is None:
-            await ctx.send("❌ 사용법: `!jk레벨 set [사용자ID] [레벨]` 또는 `!jk레벨 set i [레벨]`\n예: `!jk레벨 set 123456789012345678 50`")
+            await ctx.send(
+                "❌ 사용법: `!jk레벨 set [사용자ID] [레벨]` 또는 `!jk레벨 set [사용자ID] [레벨] 포인트`\n"
+                "예: `!jk레벨 set 123456789012345678 50` (포인트 없이)\n"
+                "예: `!jk레벨 set 123456789012345678 50 포인트` (레벨 상승 시 해당 구간 포인트 지급)"
+            )
             return
         
         if target_level < 1:
@@ -289,6 +293,7 @@ def admin_command(k):
             return
         
         guild_id = ctx.guild.id
+        award_points = opt is not None and str(opt).strip() == "포인트"
         
         # 사용자 정보 가져오기 (로깅용)
         target_user = ctx.guild.get_member(target_user_id)
@@ -297,7 +302,7 @@ def admin_command(k):
         else:
             user_display = f"{target_user.display_name} ({target_user.mention})"
         
-        result = await set_level(target_user_id, guild_id, target_level)
+        result = await set_level(target_user_id, guild_id, target_level, award_points=award_points)
         
         # 상세 정보 생성
         progress_percentage = (result['new_exp'] / result['required_exp'] * 100) if result['required_exp'] > 0 else 100
@@ -307,10 +312,13 @@ def admin_command(k):
             f"진행률: {result['new_exp']:,}/{result['required_exp']:,} ({progress_percentage:.1f}%)\n"
             f"총 포인트: {result['new_points']:,}"
         )
+        if award_points and result['points_earned'] > 0:
+            details += f"\n지급 포인트: {result['points_earned']:,}"
         
+        cmd_display = f"!jk레벨 set {target_user_id} {target_level}" + (" 포인트" if award_points else "")
         await send_command_log(
             ctx.bot, ctx.author,
-            f"!jk레벨 set {target_user_id} {target_level}",
+            cmd_display,
             target_user, details
         )
         
@@ -328,6 +336,8 @@ def admin_command(k):
         embed.add_field(name="이전 레벨", value=f"**{result['old_level']}**", inline=True)
         embed.add_field(name="새 레벨", value=f"**{result['new_level']}**", inline=True)
         embed.add_field(name="현재 EXP", value=f"{result['new_exp']:,} / {result['required_exp']:,}", inline=False)
+        if award_points and result['points_earned'] > 0:
+            embed.add_field(name="지급 포인트", value=f"+{result['points_earned']:,} (총 {result['new_points']:,})", inline=False)
         
         embed.set_footer(text=f"명령어 실행자: {ctx.author.display_name}")
         await ctx.send(embed=embed)
@@ -733,6 +743,8 @@ def admin_command(k):
             return
         
         voice_monitor = ctx.bot.voice_monitor
+        # 참여 현황 표시 직전에, 이 길드의 EXP 채널에 있는 멤버 세션 누락 보정
+        await voice_monitor.ensure_sessions_for_guild(ctx.guild)
         active_sessions = voice_monitor.active_sessions
         
         embed = discord.Embed(

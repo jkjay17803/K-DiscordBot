@@ -316,6 +316,22 @@ class VoiceMonitor:
         
         print(f"[VoiceMonitor] 초기화 완료. {initialized_count}명의 새로운 사용자 세션 시작.")
     
+    async def ensure_sessions_for_guild(self, guild: discord.Guild):
+        """특정 길드의 EXP 채널에 있는 멤버가 누락됐을 때 세션 보정 (참여 현황 표시 전 호출)"""
+        for channel in guild.voice_channels:
+            exp_settings = self._get_channel_exp_settings(channel.id)
+            if exp_settings is None:
+                continue
+            for member in channel.members:
+                if member.bot:
+                    continue
+                # 세션이 없거나, 다른 채널용 세션이면 지금 채널 기준으로 세션 생성/갱신
+                if member.id not in self.active_sessions or self.active_sessions[member.id]['channel_id'] != channel.id:
+                    try:
+                        await self._handle_voice_join(member, channel, guild.id, member.id, silent=True)
+                    except Exception as e:
+                        print(f"[VoiceMonitor] 세션 보정 실패: {member.name} - {e}")
+    
     def get_active_users(self) -> list:
         """현재 음성채널에 있는 사용자 목록 반환"""
         return list(self.active_sessions.keys())

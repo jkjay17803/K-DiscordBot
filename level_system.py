@@ -83,11 +83,11 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction:
     }
     """
     import aiosqlite
-    from database import DB_PATH, get_user, create_user
+    from database import DB_PATH, DB_TIMEOUT, get_user, create_user
     
     # 트랜잭션 모드
     if use_transaction:
-        db = await aiosqlite.connect(DB_PATH)
+        db = await aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT)
         await db.execute("BEGIN TRANSACTION")
         
         try:
@@ -167,9 +167,10 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction:
     return result
 
 
-async def set_level(user_id: int, guild_id: int, target_level: int) -> dict:
+async def set_level(user_id: int, guild_id: int, target_level: int, award_points: bool = False) -> dict:
     """
     사용자의 레벨을 직접 설정
+    award_points: True면 낮은 레벨→높은 레벨일 때만, 현재 레벨+1 ~ 목표 레벨까지의 레벨업 포인트 지급
     Returns: {
         'old_level': int,
         'new_level': int,
@@ -185,7 +186,7 @@ async def set_level(user_id: int, guild_id: int, target_level: int) -> dict:
     
     old_level = user['level']
     old_total_exp = user['total_exp']
-    current_points = user['points']
+    current_points = user['points'] if user.get('points') is not None else 0
     
     # 레벨이 같으면 변경 없음
     if old_level == target_level:
@@ -209,9 +210,12 @@ async def set_level(user_id: int, guild_id: int, target_level: int) -> dict:
     new_exp = 0
     new_total_exp = total_exp_needed
     
-    # 레벨 변경 시 포인트는 변하지 않음
+    # 포인트: 낮은→높은 레벨일 때만 (현재+1 ~ 목표 레벨) 구간 레벨업 포인트 지급, 높은→낮은 레벨은 지급 없음
     points_earned = 0
-    new_points = current_points
+    if award_points and target_level > old_level:
+        for level in range(old_level + 1, target_level + 1):
+            points_earned += get_points_for_level(level)
+    new_points = current_points + points_earned
     
     # 데이터베이스 업데이트
     await update_user_level(user_id, guild_id, target_level, new_exp, new_points, new_total_exp)

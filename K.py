@@ -180,7 +180,7 @@ async def on_member_join(member: discord.Member):
         print(f"[MemberJoin] Error processing member join for {member.name}: {e}")
         import traceback
         traceback.print_exc()
-
+    
 
 @k.event
 async def on_command_error(ctx, error):
@@ -207,6 +207,9 @@ async def on_command_error(ctx, error):
         await ctx.send(f"❌ 인자를 올바르게 입력해주세요. `!{ctx.command.name}` 명령어 사용법을 확인해주세요.")
     elif isinstance(error, commands.CheckFailure):
         await ctx.send("❌ 이 명령어를 사용할 권한이 없습니다.")
+    elif isinstance(error, commands.CommandInvokeError) and error.original is not None:
+        orig = error.original
+        await ctx.send(f"❌ 명령어 실행 중 오류가 발생했습니다: {type(orig).__name__}: {orig}")
     else:
         await ctx.send(f"❌ 명령어 실행 중 오류가 발생했습니다: {type(error).__name__}")
 
