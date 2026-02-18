@@ -6,7 +6,8 @@ from datetime import datetime
 from study_manager import (
     add_member_to_study, remove_member_from_study,
     add_warning_to_study_member, remove_warning_from_study_member,
-    get_study_channel_id, get_study_member_warning, get_study_member_info
+    get_study_channel_id, get_study_member_warning, get_study_member_info,
+    read_study_file, create_study, delete_study
 )
 from utils import has_jk_role
 
@@ -20,22 +21,19 @@ def check_jk():
 
 class StudyDeleteConfirmView(discord.ui.View):
     """스터디 삭제 확인 버튼 뷰"""
-    
+
     def __init__(self, study_name: str, member_count: int):
-        super().__init__(timeout=60)  # 60초 타임아웃
+        super().__init__(timeout=60)
         self.study_name = study_name
         self.member_count = member_count
         self.deleted = False
-    
+
     @discord.ui.button(label="✅ 삭제 확인", style=discord.ButtonStyle.red)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from study_manager import delete_study
-        
         if self.deleted:
             await interaction.response.send_message("❌ 이미 삭제되었습니다.", ephemeral=True)
             return
-        
-        # 스터디 삭제
+
         success = delete_study(self.study_name)
         
         if not success:
@@ -379,8 +377,6 @@ def study_command(k):
     @check_jk()
     async def study_create_command(ctx, study_name: str = None, channel_id: int = None):
         """스터디 생성 및 회의실 ID 설정"""
-        from study_manager import create_study
-        
         if study_name is None or channel_id is None:
             await ctx.send("❌ 사용법: `!jk스터디 study add [studyName] [회의실ID]`\n예: `!jk스터디 study add Java 123456789012345678`")
             return
@@ -426,8 +422,6 @@ def study_command(k):
     @check_jk()
     async def study_delete_command(ctx, study_name: str = None):
         """스터디 삭제 (확인 절차 필요)"""
-        from study_manager import delete_study, read_study_file
-        
         if study_name is None:
             await ctx.send("❌ 사용법: `!jk스터디 study remove [studyName]`\n예: `!jk스터디 study remove Java`")
             return

@@ -32,6 +32,10 @@ from voice_monitor import setup_voice_monitor
 from nickname_manager import initial_nickname_update, update_user_nickname, setup_nickname_update_event
 from role_manager import initial_tier_role_update, update_tier_role
 from level_system import set_level
+from commands.slash_commands import setup_slash_commands
+
+# Beta V2: Prefix 제거, Slash 명령어 사용
+# 기존 Prefix 명령어는 하위 호환을 위해 유지 (level_command, market_command 등)
 from commands.level_command import level_command
 from commands.rank_command import rank_command
 from commands.admin_command import admin_command
@@ -45,15 +49,13 @@ from commands.reboot_command import reboot_command
 
 load_dotenv()
 
-# .env
 TOKEN = os.getenv("DISCORD_TOKEN")
-
-# Permission - Intents
 intents = discord.Intents.all()
-# command - 정의
 k = commands.Bot(command_prefix='!', intents=intents)
 
-# modules
+# Slash 명령어는 on_ready에서 await setup_slash_commands(k)로 등록
+
+# Prefix 명령어 (하위 호환 - Slash와 병행)
 message_with_channel_id(k)
 level_command(k)
 rank_command(k)
@@ -70,7 +72,10 @@ reboot_command(k)
 @k.event
 async def on_ready():
     print(f"Logged in as {k.user}")
-    
+
+    # Slash 명령어 등록 (Beta V2) — async이므로 여기서 await
+    await setup_slash_commands(k)
+
     # voice_channel_exp.txt 파일 초기화 (config.py 설정 마이그레이션)
     from voice_channel_exp_manager import load_voice_channel_exp, save_voice_channel_exp
     from config import VOICE_CHANNEL_EXP
@@ -103,14 +108,15 @@ async def on_ready():
         save_tier_roles(_DEFAULT_TIER_ROLES)
         print(f"[TierRoles] Migrated {len(_DEFAULT_TIER_ROLES)} tier roles from config.py to tier_roles.txt")
     
-    # 데이터베이스 초기화
-    await init_database()
-    print("[Database] Database initialized")
-    
-    # 모든 서버의 모든 멤버 초기화
-    print("[Database] Initializing all members...")
-    result = await initialize_all_members(k.guilds)
-    print(f"[Database] Members initialized: {result['created']} created, {result['skipped']} already existed")
+    # 데이터베이스 초기화 (SQLite, k_bot.db)
+    try:
+        await init_database()
+        print("[Database] Database initialized")
+        print("[Database] Initializing all members...")
+        result = await initialize_all_members(k.guilds)
+        print(f"[Database] Members initialized: {result['created']} created, {result['skipped']} already existed")
+    except Exception as e:
+        print(f"[Database] DB 초기화 실패 — 봇은 실행되지만 DB 기능은 사용할 수 없습니다: {e}")
     
     # 음성 모니터링 설정
     voice_monitor = setup_voice_monitor(k)
@@ -129,7 +135,20 @@ async def on_ready():
     # 닉네임 변경 이벤트 핸들러 설정 (이벤트 기반 업데이트)
     setup_nickname_update_event(k)
     print("[NicknameManager] Nickname update event handler registered (이벤트 기반)")
-    
+
+    # Slash 명령어 동기화 (Beta V2)
+    try:
+        from config import SLASH_SYNC_GUILD_ID
+        if SLASH_SYNC_GUILD_ID:
+            k.tree.copy_global_to(guild=discord.Object(id=SLASH_SYNC_GUILD_ID))
+            synced = await k.tree.sync(guild=discord.Object(id=SLASH_SYNC_GUILD_ID))
+            print(f"[Slash] 길드 동기화 완료: {len(synced)}개")
+        else:
+            synced = await k.tree.sync()
+            print(f"[Slash] 글로벌 동기화 완료: {len(synced)}개")
+    except Exception as e:
+        print(f"[Slash] 동기화 오류: {e}")
+
     print("K 봇이 준비되었습니다!")
 
 

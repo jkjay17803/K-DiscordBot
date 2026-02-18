@@ -79,42 +79,41 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction:
         'new_exp': int,
         'points_earned': int,
         'new_points': int,
-        'db': aiosqlite.Connection (use_transaction=True일 때만)
+        'db': DB connection (use_transaction=True일 때만, commit/rollback/close 책임)
     }
     """
-    import aiosqlite
-    from database import DB_PATH, DB_TIMEOUT, get_user, create_user
+    from datetime import datetime
+    from database import get_mysql_connection, get_or_create_user
     
-    # 트랜잭션 모드
+    conn = None
+    cursor = None
+    
     if use_transaction:
-        db = await aiosqlite.connect(DB_PATH, timeout=DB_TIMEOUT)
-        await db.execute("BEGIN TRANSACTION")
-        
+        conn = await get_mysql_connection()
+        cursor = conn.cursor()  # aiosqlite: cursor()는 동기
+
         try:
-            # 사용자 조회 (트랜잭션 내)
-            async with db.execute(
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:26]
+            await cursor.execute(
                 "SELECT level, exp, points, total_exp FROM users WHERE user_id = ? AND guild_id = ?",
                 (user_id, guild_id)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row is None:
-                    # 사용자 생성 (트랜잭션 내)
-                    from datetime import datetime
-                    await db.execute(
-                        """INSERT INTO users 
-                           (user_id, guild_id, level, exp, points, total_exp, last_nickname_update)
-                           VALUES (?, ?, 1, 0, 0, 0, ?)""",
-                        (user_id, guild_id, datetime.now().isoformat())
-                    )
-                    user = {'level': 1, 'exp': 0, 'points': 0, 'total_exp': 0}
-                else:
-                    user = {'level': row[0], 'exp': row[1], 'points': row[2], 'total_exp': row[3]}
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await cursor.execute(
+                    """INSERT INTO users 
+                       (user_id, guild_id, level, exp, points, total_exp, last_nickname_update)
+                       VALUES (?, ?, 1, 0, 0, 0, ?)""",
+                    (user_id, guild_id, now_str)
+                )
+                user = {'level': 1, 'exp': 0, 'points': 0, 'total_exp': 0}
+            else:
+                user = {'level': row[0], 'exp': row[1], 'points': row[2], 'total_exp': row[3]}
         except Exception as e:
-            await db.rollback()
-            await db.close()
+            await conn.rollback()
+            await conn.close()
             raise e
     else:
-        db = None
         user = await get_or_create_user(user_id, guild_id)
     
     current_level = user['level']
@@ -122,31 +121,18 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction:
     current_total_exp = user['total_exp']
     current_points = user['points']
     
-    # 총 exp에 추가
     new_total_exp = current_total_exp + exp_to_add
-    
-    # 새로운 레벨과 exp 계산
     new_level, new_exp = calculate_level_from_total_exp(new_total_exp)
-    
-    # 레벨업 체크
     leveled_up = new_level > current_level
     points_earned = 0
     
     if leveled_up:
-        # 레벨업한 만큼 포인트 지급 (각 레벨마다 티어별 포인트 적용)
-        levels_gained = new_level - current_level
-        points_earned = 0
-        
-        # 각 레벨업마다 해당 레벨의 티어에 맞는 포인트 지급
         for level in range(current_level + 1, new_level + 1):
             points_earned += get_points_for_level(level)
-        
         new_points = current_points + points_earned
-        
-        await update_user_level(user_id, guild_id, new_level, new_exp, new_points, new_total_exp, db=db)
+        await update_user_level(user_id, guild_id, new_level, new_exp, new_points, new_total_exp, cursor=cursor)
     else:
-        # exp만 업데이트
-        await update_user_exp(user_id, guild_id, new_exp, new_total_exp, db=db)
+        await update_user_exp(user_id, guild_id, new_exp, new_total_exp, cursor=cursor)
         new_points = current_points
     
     result = {
@@ -162,7 +148,7 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction:
     }
     
     if use_transaction:
-        result['db'] = db
+        result['db'] = conn
     
     return result
 

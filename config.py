@@ -62,6 +62,9 @@ NICKNAME_REFRESH_INTERVAL = 3600  # 1시간 (초 단위)
 # 음성채널 체크 주기
 VOICE_CHECK_INTERVAL = 60  # 1분마다 exp 체크 (초 단위)
 
+# Slash 명령어 동기화 (개발 시 길드 ID 지정하면 빠른 반영, None이면 글로벌 동기화)
+SLASH_SYNC_GUILD_ID = None  # 예: 1234567890123456789
+
 # 명령어 제한 채널
 RANK_COMMAND_CHANNEL_ID = 1447457558762622976  # None이면 모든 채널에서 사용 가능, 채널 ID를 입력하면 해당 채널에서만 사용 가능
 MARKET_COMMAND_CHANNEL_ID = 1453344981141033018  # 마켓 명령어 채널 ID

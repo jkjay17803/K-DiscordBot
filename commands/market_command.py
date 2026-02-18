@@ -22,62 +22,46 @@ def market_command(k):
         마켓의 모든 물품 정보를 표시합니다.
         사용법: !마켓
         """
-        # JK 권한 체크 (JK 권한이 있으면 마켓 활성화 및 채널 제한 무시)
         user_has_jk = has_jk_role(ctx.author)
-        
-        # 경고 체크 (JK 권한이 없을 때만)
         if not user_has_jk:
             restrictions = await check_warning_restrictions(ctx.author.id, ctx.guild.id)
             if not restrictions['can_use_market']:
                 await ctx.send(f"❌ 경고 5회 이상으로 마켓을 이용할 수 없습니다. (현재 경고: {restrictions['warning_count']}회)")
                 return
-        
-        # 마켓 활성화 상태 체크 (JK 권한이 없을 때만)
         if not user_has_jk:
             market_enabled = await get_market_enabled(ctx.guild.id)
             if not market_enabled:
                 await ctx.send("❌ 현재 마켓이 비활성화되어 있습니다. 관리자에게 문의하세요.")
                 return
-        
-        # 채널 제한 체크 (JK 권한이 없을 때만)
         if not user_has_jk and MARKET_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != MARKET_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{MARKET_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return
-        
+
         ensure_market_dir()
-        
         all_items = get_all_market_items()
-        
+
         if not all_items:
             await ctx.send("❌ 현재 판매 중인 물품이 없습니다.")
             return
-        
-        # 임베드 생성
+
         embed = discord.Embed(
             title="🛒 마켓",
             description="현재 판매 중인 물품 목록",
             color=discord.Color.green()
         )
-        
-        # 전체 아이템 수 계산
         total_items = sum(len(items) for items in all_items.values())
-        
         item_count = 0
         for filename, items in all_items.items():
             for item in items:
                 item_count += 1
-                
-                # 필드 값 생성
                 if item.is_role:
-                    # 역할 아이템
                     field_name = f"+ 역할 - {item.role_name}"
                     field_value = (
                         f"🎫 **{item.code}** (물품 코드)\n"
                         f"구매된 횟수 : {item.tickets_sold}"
                     )
                 else:
-                    # 일반 티켓 아이템
                     field_name = f"**- {item.name}**"
                     field_value = (
                         f"🎫 **{item.code}** (물품 코드)\n\n"
@@ -86,95 +70,64 @@ def market_command(k):
                         f"**구매된 티켓 수:** {item.tickets_sold}티켓\n"
                         f"**1인당 최대:** {item.max_purchase}티켓"
                     )
-                
-                # 마지막 물품이 아니면 간격 추가 (세 줄)
                 if item_count < total_items:
                     field_value += "\n\n=========\n"
-                
-                embed.add_field(
-                    name=field_name,
-                    value=field_value,
-                    inline=False
-                )
-        
+                embed.add_field(name=field_name, value=field_value, inline=False)
+
         if item_count == 0:
             await ctx.send("❌ 현재 판매 중인 물품이 없습니다.")
             return
-        
         embed.set_footer(text=f"총 {item_count}개의 물품 \n!구매 [물품코드]로 구매하세요!")
-        
         await ctx.send(embed=embed)
-    
+
     @k.command(name="구매")
     async def purchase_item(ctx, item_code: str = None):
-        """
-        티켓을 구매합니다.
-        사용법: !구매 [물품 코드]
-        """
-        # JK 권한 체크 (JK 권한이 있으면 마켓 활성화 및 채널 제한 무시)
+        """티켓을 구매합니다. 사용법: !구매 [물품 코드]"""
         user_has_jk = has_jk_role(ctx.author)
-        
-        # 경고 체크 (JK 권한이 없을 때만)
         if not user_has_jk:
             restrictions = await check_warning_restrictions(ctx.author.id, ctx.guild.id)
             if not restrictions['can_use_market']:
                 await ctx.send(f"❌ 경고 5회 이상으로 마켓을 이용할 수 없습니다. (현재 경고: {restrictions['warning_count']}회)")
                 return
-        
-        # 마켓 활성화 상태 체크 (JK 권한이 없을 때만)
         if not user_has_jk:
             market_enabled = await get_market_enabled(ctx.guild.id)
             if not market_enabled:
                 await ctx.send("❌ 현재 마켓이 비활성화되어 있습니다. 관리자에게 문의하세요.")
                 return
-        
-        # 채널 제한 체크 (JK 권한이 없을 때만)
         if not user_has_jk and MARKET_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != MARKET_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{MARKET_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return
-        
+
         if item_code is None:
             await ctx.send("❌ 사용법: `!구매 [물품코드]`\n예: `!구매 ABC123`")
             return
-        
+
         ensure_market_dir()
-        
-        # 아이템 찾기
         result = find_item_by_code(item_code)
         if result is None:
             await ctx.send(f"❌ 물품 코드 `{item_code}`를 찾을 수 없습니다. `!마켓`으로 확인해주세요.")
             return
-        
+
         filename, item = result
-        
-        # 구매 가능 여부 확인
         if not item.is_available():
             await ctx.send(f"❌ `{item.name}`은(는) 품절되었습니다.")
             return
-        
-        # 사용자 정보 조회 (없으면 생성하여 포인트 0으로 처리)
+
         user_id = ctx.author.id
         guild_id = ctx.guild.id
         user = await get_or_create_user(user_id, guild_id)
-        
-        # points가 NULL/문자열이면 0으로 처리 (DB 레거시/예외 방지)
         user_name = ctx.author.display_name or str(ctx.author)
         try:
             user_points = int(user.get("points") or 0)
         except (TypeError, ValueError):
             user_points = 0
-        
-        # 구매 가능 수 확인
+
         if item.is_role:
-            # 역할 아이템: 이미 역할을 가지고 있는지 확인
             if not item.can_purchase(user_name):
-                await ctx.send(
-                    f"❌ `{item.name}` 역할을 이미 보유하고 있습니다."
-                )
+                await ctx.send(f"❌ `{item.name}` 역할을 이미 보유하고 있습니다.")
                 return
         else:
-            # 일반 티켓 아이템
             user_ticket_count = item.get_user_ticket_count(user_name)
             if not item.can_purchase(user_name):
                 await ctx.send(
@@ -182,8 +135,7 @@ def market_command(k):
                     f"현재 구매한 티켓: {user_ticket_count}개"
                 )
                 return
-        
-        # 포인트 확인
+
         if user_points < item.price_per_ticket:
             await ctx.send(
                 f"❌ 포인트가 부족합니다.\n"
@@ -191,63 +143,42 @@ def market_command(k):
                 f"보유 포인트: {user_points:,}"
             )
             return
-        
-        # 확인 버튼 생성
+
+        user_ticket_count = item.get_user_ticket_count(user_name) if not item.is_role else 0
+
         if item.is_role:
             embed = discord.Embed(
                 title="🛒 역할 구매 확인",
                 description=f"**{item.role_name}** 역할을 구매하시겠습니까?",
                 color=discord.Color.blue()
             )
-            
-            embed.add_field(
-                name="물품 정보",
-                value=(
-                    f"**역할 이름:** {item.role_name}\n"
-                    f"**물품 코드:** {item.code}\n"
-                    f"**가격:** {item.price_per_ticket:,} 포인트"
-                ),
-                inline=False
-            )
-            
-            embed.add_field(
-                name="구매 정보",
-                value=(
-                    f"**보유 포인트:** {user_points:,}\n"
-                    f"**구매 후 포인트:** {user_points - item.price_per_ticket:,}"
-                ),
-                inline=False
-            )
+            embed.add_field(name="물품 정보", value=(
+                f"**역할 이름:** {item.role_name}\n"
+                f"**물품 코드:** {item.code}\n"
+                f"**가격:** {item.price_per_ticket:,} 포인트"
+            ), inline=False)
+            embed.add_field(name="구매 정보", value=(
+                f"**보유 포인트:** {user_points:,}\n"
+                f"**구매 후 포인트:** {user_points - item.price_per_ticket:,}"
+            ), inline=False)
         else:
             embed = discord.Embed(
                 title="🛒 티켓 구매 확인",
                 description=f"**{item.name}** 티켓을 구매하시겠습니까?",
                 color=discord.Color.blue()
             )
-            
-            embed.add_field(
-                name="물품 정보",
-                value=(
-                    f"**물품명:** {item.name}\n"
-                    f"**물품 코드:** {item.code}\n"
-                    f"**티켓 가격:** {item.price_per_ticket:,} 포인트"
-                ),
-                inline=False
-            )
-            
-            embed.add_field(
-                name="구매 정보",
-                value=(
-                    f"**보유 포인트:** {user_points:,}\n"
-                    f"**구매 후 포인트:** {user_points - item.price_per_ticket:,}\n"
-                    f"**현재 구매한 티켓:** {user_ticket_count}개 / {item.max_purchase}개"
-                ),
-                inline=False
-            )
-        
+            embed.add_field(name="물품 정보", value=(
+                f"**물품명:** {item.name}\n"
+                f"**물품 코드:** {item.code}\n"
+                f"**티켓 가격:** {item.price_per_ticket:,} 포인트"
+            ), inline=False)
+            embed.add_field(name="구매 정보", value=(
+                f"**보유 포인트:** {user_points:,}\n"
+                f"**구매 후 포인트:** {user_points - item.price_per_ticket:,}\n"
+                f"**현재 구매한 티켓:** {user_ticket_count}개 / {item.max_purchase}개"
+            ), inline=False)
+
         embed.set_footer(text="구매를 확인하려면 아래 버튼을 눌러주세요.")
-        
-        # 버튼 생성
         view = PurchaseConfirmView(
             item=item,
             filename=filename,
@@ -257,43 +188,31 @@ def market_command(k):
             price=item.price_per_ticket,
             user_points=user_points
         )
-        
         await ctx.send(embed=embed, view=view)
-    
+
     @k.command(name="티켓목록")
     async def show_ticket_list(ctx):
-        """
-        자신이 구매한 티켓 목록을 표시합니다.
-        사용법: !티켓목록
-        """
-        # JK 권한 체크 (JK 권한이 있으면 마켓 활성화 및 채널 제한 무시)
+        """자신이 구매한 티켓 목록을 표시합니다."""
         user_has_jk = has_jk_role(ctx.author)
-        
-        # 경고 체크 (JK 권한이 없을 때만)
         if not user_has_jk:
             restrictions = await check_warning_restrictions(ctx.author.id, ctx.guild.id)
             if not restrictions['can_use_market']:
                 await ctx.send(f"❌ 경고 5회 이상으로 마켓을 이용할 수 없습니다. (현재 경고: {restrictions['warning_count']}회)")
                 return
-        
-        # 마켓 활성화 상태 체크 (JK 권한이 없을 때만)
         if not user_has_jk:
             market_enabled = await get_market_enabled(ctx.guild.id)
             if not market_enabled:
                 await ctx.send("❌ 현재 마켓이 비활성화되어 있습니다. 관리자에게 문의하세요.")
                 return
-        
-        # 채널 제한 체크 (JK 권한이 없을 때만)
         if not user_has_jk and MARKET_COMMAND_CHANNEL_ID is not None:
             if ctx.channel.id != MARKET_COMMAND_CHANNEL_ID:
                 await ctx.send(f"❌ 이 명령어는 <#{MARKET_COMMAND_CHANNEL_ID}> 채널에서만 사용할 수 있습니다.")
                 return
-        
+
         ensure_market_dir()
-        
         user_name = ctx.author.display_name
         user_purchases = get_user_purchase_history(user_name)
-        
+
         if not user_purchases:
             embed = discord.Embed(
                 title="🎫 티켓 목록",
@@ -302,17 +221,13 @@ def market_command(k):
             )
             await ctx.send(embed=embed)
             return
-        
-        # 임베드 생성
+
         embed = discord.Embed(
             title="🎫 티켓 목록",
             description=f"**{user_name}**님이 구매한 티켓 목록",
             color=discord.Color.blue()
         )
-        
-        # 물품별로 그룹화 (같은 물품이 여러 파일에 있을 수 있음)
-        item_summary = {}  # {item_code: (item_name, total_count, max_purchase)}
-        
+        item_summary = {}
         for filename, item, ticket_count in user_purchases:
             if item.code not in item_summary:
                 item_summary[item.code] = {
@@ -324,8 +239,7 @@ def market_command(k):
                     'role_name': item.role_name if item.is_role else None
                 }
             item_summary[item.code]['total_count'] += ticket_count
-        
-        # 필드 추가
+
         for item_code, info in item_summary.items():
             if info['is_role']:
                 field_value = (
@@ -333,34 +247,25 @@ def market_command(k):
                     f"**가격:** {info['price']:,} 포인트\n"
                     f"**상태:** 보유 중"
                 )
-                embed.add_field(
-                    name=f"🎭 {item_code}",
-                    value=field_value,
-                    inline=False
-                )
+                embed.add_field(name=f"🎭 {item_code}", value=field_value, inline=False)
             else:
                 field_value = (
                     f"**물품명:** {info['name']}\n"
                     f"**티켓 가격:** {info['price']:,} 포인트\n"
                     f"**보유 티켓:** {info['total_count']}개 / {info['max_purchase']}개"
                 )
-                embed.add_field(
-                    name=f"🎫 {item_code}",
-                    value=field_value,
-                    inline=False
-                )
-        
+                embed.add_field(name=f"🎫 {item_code}", value=field_value, inline=False)
+
         embed.set_footer(text=f"총 {len(item_summary)}개의 물품을 구매하셨습니다.")
-        
         await ctx.send(embed=embed)
 
 
 class PurchaseConfirmView(discord.ui.View):
     """구매 확인 버튼 뷰"""
-    
-    def __init__(self, item, filename: str, user_id: int, guild_id: int, 
+
+    def __init__(self, item, filename: str, user_id: int, guild_id: int,
                  user_name: str, price: int, user_points: int):
-        super().__init__(timeout=60)  # 60초 타임아웃
+        super().__init__(timeout=60)
         self.item = item
         self.filename = filename
         self.user_id = user_id
@@ -369,19 +274,17 @@ class PurchaseConfirmView(discord.ui.View):
         self.price = price
         self.user_points = user_points
         self.purchased = False
-    
+
     @discord.ui.button(label="✅ 구매 확인", style=discord.ButtonStyle.green)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ 본인만 구매할 수 있습니다.", ephemeral=True)
             return
-        
-        # 다시 한번 확인 (포인트, 구매 가능 수)
+
         user = await get_user(self.user_id, self.guild_id)
         if user is None:
             await interaction.response.send_message("❌ 사용자 정보를 찾을 수 없습니다.", ephemeral=True)
             return
-        
         try:
             current_points = int(user.get('points') or 0)
         except (TypeError, ValueError):
@@ -392,24 +295,18 @@ class PurchaseConfirmView(discord.ui.View):
                 ephemeral=True
             )
             return
-        
-        # 파일 락 획득 (동시 구매 방지)
-        from market_manager import get_file_lock, purchase_ticket
+
+        from market_manager import get_file_lock, purchase_ticket, find_item_by_code
         file_lock = await get_file_lock(self.filename)
-        
+
         async with file_lock:
-            # 아이템 정보 다시 확인 (락 내부에서)
-            from market_manager import find_item_by_code
             result = find_item_by_code(self.item.code)
             if result is None:
                 await interaction.response.send_message("❌ 물품을 찾을 수 없습니다.", ephemeral=True)
                 return
-            
             _, updated_item = result
-            
-            # 역할 아이템인지 확인
+
             if updated_item.is_role:
-                # 역할 아이템: 이미 역할을 가지고 있는지 확인
                 if not updated_item.can_purchase(self.user_name):
                     await interaction.response.send_message(
                         f"❌ 이미 {updated_item.role_name} 역할을 보유하고 있습니다.",
@@ -417,7 +314,6 @@ class PurchaseConfirmView(discord.ui.View):
                     )
                     return
             else:
-                # 일반 티켓 아이템
                 user_ticket_count = updated_item.get_user_ticket_count(self.user_name)
                 if not updated_item.can_purchase(self.user_name):
                     await interaction.response.send_message(
@@ -425,33 +321,26 @@ class PurchaseConfirmView(discord.ui.View):
                         ephemeral=True
                     )
                     return
-            
+
             if not updated_item.is_available():
                 await interaction.response.send_message("❌ 품절되었습니다.", ephemeral=True)
                 return
-            
-            # 포인트 차감
+
             new_points = current_points - self.price
             await update_user_points(self.user_id, self.guild_id, new_points)
-            
-            # 역할 아이템인 경우 역할 부여
+
             if updated_item.is_role:
                 guild = interaction.guild
                 member = guild.get_member(self.user_id)
-                
                 if member is None:
                     await update_user_points(self.user_id, self.guild_id, current_points)
                     await interaction.response.send_message("❌ 사용자를 찾을 수 없습니다.", ephemeral=True)
                     return
-                
-                # 역할 찾기
                 role = discord.utils.get(guild.roles, name=updated_item.role_name)
                 if role is None:
                     await update_user_points(self.user_id, self.guild_id, current_points)
                     await interaction.response.send_message(f"❌ 역할 '{updated_item.role_name}'을(를) 찾을 수 없습니다.", ephemeral=True)
                     return
-                
-                # 역할 부여
                 try:
                     await member.add_roles(role, reason=f"마켓에서 {updated_item.role_name} 역할 구매")
                 except discord.Forbidden:
@@ -462,115 +351,68 @@ class PurchaseConfirmView(discord.ui.View):
                     await update_user_points(self.user_id, self.guild_id, current_points)
                     await interaction.response.send_message(f"❌ 역할 부여 중 오류가 발생했습니다: {e}", ephemeral=True)
                     return
-                
-                # 구매자 목록에 추가 (파일 저장) - 락 내부에서 실행
+
                 success = purchase_ticket(self.filename, self.item.code, self.user_name)
-                
                 if not success:
-                    # 실패 시 포인트 복구 및 역할 제거
                     await update_user_points(self.user_id, self.guild_id, current_points)
                     try:
                         await member.remove_roles(role, reason="구매 처리 실패로 인한 역할 제거")
-                    except:
+                    except Exception:
                         pass
                     await interaction.response.send_message("❌ 구매 처리 중 오류가 발생했습니다.", ephemeral=True)
                     return
-                
+
                 self.purchased = True
-                
-                # 성공 메시지
                 success_embed = discord.Embed(
                     title="✅ 구매 완료",
                     description=f"**{updated_item.role_name}** 역할을 구매했습니다!",
                     color=discord.Color.green()
                 )
-                
-                success_embed.add_field(
-                    name="구매 정보",
-                    value=(
-                        f"**물품 코드:** {self.item.code}\n"
-                        f"**역할 이름:** {updated_item.role_name}\n"
-                        f"**가격:** {self.price:,} 포인트\n"
-                        f"**구매 후 포인트:** {new_points:,}"
-                    ),
-                    inline=False
-                )
-                
+                success_embed.add_field(name="구매 정보", value=(
+                    f"**물품 코드:** {self.item.code}\n"
+                    f"**역할 이름:** {updated_item.role_name}\n"
+                    f"**가격:** {self.price:,} 포인트\n"
+                    f"**구매 후 포인트:** {new_points:,}"
+                ), inline=False)
                 await interaction.response.edit_message(embed=success_embed, view=None)
-                
-                # 로그 전송
                 await send_purchase_log(
-                    interaction.client,
-                    interaction.user,
-                    updated_item.role_name,
-                    self.item.code,
-                    self.price,
-                    new_points,
-                    1,  # 역할은 1개
-                    1   # 최대 1개
+                    interaction.client, interaction.user,
+                    updated_item.role_name, self.item.code, self.price, new_points, 1, 1
                 )
             else:
-                # 일반 티켓 구매 처리 - 락 내부에서 실행
                 success = purchase_ticket(self.filename, self.item.code, self.user_name)
-                
                 if not success:
-                    # 실패 시 포인트 복구
                     await update_user_points(self.user_id, self.guild_id, current_points)
                     await interaction.response.send_message("❌ 구매 처리 중 오류가 발생했습니다.", ephemeral=True)
                     return
-                
                 self.purchased = True
-                
                 user_ticket_count = updated_item.get_user_ticket_count(self.user_name)
-                
-                # 성공 메시지
                 success_embed = discord.Embed(
                     title="✅ 구매 완료",
-                    description=f"**{self.item.name}** 티켓을 구매했습니다!",
+                    description=f"**{updated_item.name}** 티켓을 구매했습니다!",
                     color=discord.Color.green()
                 )
-                
-                success_embed.add_field(
-                    name="구매 정보",
-                    value=(
-                        f"**물품 코드:** {self.item.code}\n"
-                        f"**티켓 가격:** {self.price:,} 포인트\n"
-                        f"**구매 후 포인트:** {new_points:,}\n"
-                        f"**보유 티켓:** {user_ticket_count + 1}개 / {updated_item.max_purchase}개"
-                    ),
-                    inline=False
-                )
-                
+                success_embed.add_field(name="구매 정보", value=(
+                    f"**물품 코드:** {self.item.code}\n"
+                    f"**티켓 가격:** {self.price:,} 포인트\n"
+                    f"**구매 후 포인트:** {new_points:,}\n"
+                    f"**보유 티켓:** {user_ticket_count + 1}개 / {updated_item.max_purchase}개"
+                ), inline=False)
                 await interaction.response.edit_message(embed=success_embed, view=None)
-                
-                # 로그 전송
                 await send_purchase_log(
-                    interaction.client,
-                    interaction.user,
-                    self.item.name,
-                    self.item.code,
-                    self.price,
-                    new_points,
-                    user_ticket_count + 1,  # 구매 후 티켓 수
-                    updated_item.max_purchase
+                    interaction.client, interaction.user,
+                    self.item.name, self.item.code, self.price, new_points,
+                    user_ticket_count + 1, updated_item.max_purchase
                 )
-    
+
     @discord.ui.button(label="❌ 취소", style=discord.ButtonStyle.red)
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ 본인만 취소할 수 있습니다.", ephemeral=True)
             return
-        
-        cancel_embed = discord.Embed(
-            title="❌ 구매 취소",
-            description="구매가 취소되었습니다.",
-            color=discord.Color.red()
-        )
-        
+        cancel_embed = discord.Embed(title="❌ 구매 취소", description="구매가 취소되었습니다.", color=discord.Color.red())
         await interaction.response.edit_message(embed=cancel_embed, view=None)
-    
-    async def on_timeout(self):
-        # 타임아웃 시 버튼 비활성화
-        for item in self.children:
-            item.disabled = True
 
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
