@@ -12,8 +12,8 @@ from database import (
     update_last_voice_join
 )
 from level_system import add_exp
-from nickname_manager import update_user_nickname
-from role_manager import update_tier_role
+from nickname_manager import sync_level_display
+from role_manager import get_tier_for_level
 from logger import send_levelup_log, send_tier_upgrade_log
 from warning_system import check_warning_restrictions
 from utils import has_jk_role
@@ -121,6 +121,9 @@ class VoiceMonitor:
             from database import get_or_create_user
             await get_or_create_user(user_id, guild_id)
             
+            # 상호작용 시점에 DB 기준으로 닉네임/역할 동기화 (레벨업 반영)
+            await sync_level_display(member)
+            
             # 세션 생성
             session_id = await create_voice_session(user_id, guild_id, channel.id)
             await update_last_voice_join(user_id, guild_id)
@@ -225,27 +228,23 @@ class VoiceMonitor:
                 result = await add_exp(user_id, guild_id, exp_amount, use_transaction=True)
                 db = result.get('db')
                 
-                # 레벨업 시 닉네임 업데이트, 역할 업데이트 및 로그 전송
+                # exp는 항상 먼저 커밋 (Discord API 실패해도 지급분은 유지)
+                if db:
+                    await db.commit()
+                    await db.close()
+                
+                # 레벨업 시 로그만 전송. 닉네임/역할은 음성 입장·채팅 등 상호작용 시 sync_level_display로 반영
                 if result['leveled_up']:
                     try:
-                        # Discord API 호출 시도
-                        nickname_success = await update_user_nickname(member, result['new_level'])
-                        role_success, old_tier, new_tier = await update_tier_role(member, result['new_level'])
-                        
-                        # 모든 작업 성공 시 커밋
-                        if db:
-                            await db.commit()
-                            await db.close()
-                        
-                        # 티어 업그레이드 축하 메시지 전송
-                        if role_success and old_tier and new_tier and old_tier != new_tier:
-                            await send_tier_upgrade_log(self.bot, member, old_tier, new_tier, result['new_level'])
-                        
-                        # 음성채널 이름 가져오기
+                        old_t = get_tier_for_level(result['old_level'])
+                        new_t = get_tier_for_level(result['new_level'])
+                        old_tier = old_t[0] if old_t else None
+                        new_tier = new_t[0] if new_t else None
+                        if old_tier != new_tier:
+                            await send_tier_upgrade_log(self.bot, member, old_tier or "", new_tier or "", result['new_level'])
                         channel_name = "알 수 없음"
                         if member.voice and member.voice.channel:
                             channel_name = member.voice.channel.name
-                        
                         await send_levelup_log(
                             self.bot,
                             member,
@@ -256,22 +255,8 @@ class VoiceMonitor:
                             f"🎤 {channel_name}"
                         )
                         print(f"[VoiceMonitor] {member.name} leveled up to {result['new_level']}!")
-                        
                     except Exception as e:
-                        # Discord API 실패 시 DB 롤백
-                        if db:
-                            try:
-                                await db.rollback()
-                                await db.close()
-                                print(f"[VoiceMonitor] 레벨업 실패로 DB 롤백: {member.name} - {e}")
-                            except Exception as rollback_error:
-                                print(f"[VoiceMonitor] 롤백 중 오류: {rollback_error}")
-                        raise e
-                else:
-                    # 레벨업 없으면 즉시 커밋
-                    if db:
-                        await db.commit()
-                        await db.close()
+                        print(f"[VoiceMonitor] 레벨업 로그 전송 실패: {member.name} - {e}")
                 
         except asyncio.CancelledError:
             # 작업이 취소되었을 때 (퇴장 시)

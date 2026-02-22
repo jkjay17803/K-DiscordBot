@@ -1,0 +1,23 @@
+fix: voice EXP grant, JK nickname on role grant, command logs, study room command
+
+## Voice EXP grant
+- Fix exp not persisting: always commit exp first, then nickname/role (voice_monitor)
+- aiosqlite compatibility: use await conn.cursor() (level_system, fixes Raspberry Pi error)
+
+## Level-up nickname/role
+- Defer to interaction: add sync_level_display() (nickname_manager)
+- Call sync_level_display on voice join (voice_monitor)
+- Call sync_level_display on message with 5-min cooldown (message_with_channel_id)
+- Remove immediate nickname/role API on level-up; send tier log via get_tier_for_level
+
+## JK command logs
+- Log /jk slash command runs to log channel (send_command_log)
+
+## New command
+- Add /스터디방확인 for all users (voice EXP settings + active/inactive by time)
+
+## JK role grant → nickname
+- On JK role added (on_member_update), apply [ ✬ ] to nickname automatically
+
+## Docs
+- docs/LOG_SUMMARY_BEFORE_UPDATE.md: Raspberry Pi log summary

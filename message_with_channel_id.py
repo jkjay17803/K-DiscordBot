@@ -1,9 +1,15 @@
 # message_with_channel_id.py
 
+import time
 import discord
 from discord.ext import commands
 from warning_system import check_warning_restrictions
 from utils import has_jk_role
+from nickname_manager import sync_level_display
+
+# 채팅 시 레벨 표시 동기화 쓰로틀: (user_id, guild_id) -> 마지막 동기화 시각
+_last_level_sync: dict[tuple[int, int], float] = {}
+_SYNC_COOLDOWN_SEC = 300  # 5분
 
 def check_jk():
     async def predicate(ctx):
@@ -52,6 +58,17 @@ def message_with_channel_id(k):
         if message.content.startswith('!'):
             await k.process_commands(message)
             return
+        
+        # 상호작용 시점에 레벨 표시(닉네임/역할) 동기화 (5분당 1회)
+        if message.guild:
+            key = (message.author.id, message.guild.id)
+            now = time.time()
+            if now - _last_level_sync.get(key, 0) >= _SYNC_COOLDOWN_SEC:
+                try:
+                    await sync_level_display(message.author)
+                    _last_level_sync[key] = now
+                except Exception:
+                    pass
         
         # JK 역할을 가진 사용자는 제한 없음
         if has_jk_role(message.author):

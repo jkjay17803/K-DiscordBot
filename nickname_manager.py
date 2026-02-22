@@ -251,6 +251,25 @@ def setup_nickname_refresh(bot):
     return task
 
 
+async def sync_level_display(member: discord.Member) -> bool:
+    """
+    DB 레벨에 맞춰 닉네임(Lv 표시)과 티어 역할을 동기화.
+    음성 입장·채팅 등 상호작용 시점에 호출하면 레벨업 반영을 지연 적용할 수 있음.
+    Returns: 동기화 수행 여부 (DB에 사용자 없으면 False)
+    """
+    try:
+        user = await get_user(member.id, member.guild.id)
+        if not user:
+            return False
+        level = user["level"]
+        await check_and_restore_nickname(member, level)
+        await update_tier_role(member, level)
+        return True
+    except Exception as e:
+        print(f"[NicknameManager] sync_level_display 오류: {member.name} - {e}")
+        return False
+
+
 async def check_and_restore_nickname(member: discord.Member, level: int) -> bool:
     """
     닉네임의 레벨 표시가 올바른지 확인하고 필요시 복원
@@ -286,12 +305,26 @@ def setup_nickname_update_event(bot):
     
     @bot.event
     async def on_member_update(before: discord.Member, after: discord.Member):
-        """멤버 정보 업데이트 감지 (닉네임 변경 등)"""
+        """멤버 정보 업데이트 감지 (닉네임 변경, 역할 변경 등)"""
         # 봇은 무시
         if after.bot:
             return
         
-        # 닉네임이 변경되었는지 확인
+        # 1) JK 역할을 새로 부여받은 경우 → 별명에 [ ✬ ] 추가
+        before_has_jk = any(r.name == "JK" for r in before.roles)
+        after_has_jk = any(r.name == "JK" for r in after.roles)
+        if not before_has_jk and after_has_jk:
+            try:
+                user = await get_user(after.id, after.guild.id)
+                if user:
+                    success = await update_user_nickname(after, user["level"])
+                    if success:
+                        print(f"[NicknameManager] JK 역할 부여 감지, 별명 업데이트: {after.name} → [ ✬ ] 표시")
+            except Exception as e:
+                print(f"[NicknameManager] JK 역할 부여 시 별명 업데이트 오류: {after.name} - {e}")
+            return
+        
+        # 2) 닉네임이 변경되었는지 확인 (레벨 표시 복원)
         if before.display_name != after.display_name:
             # 봇이 변경한 경우는 무시 (무한 루프 방지)
             if after.id in bot._nickname_update_in_progress:

@@ -357,6 +357,40 @@ async def setup_slash_commands(bot: discord.Client):
         embed.set_footer(text=f"총 {len(item_summary)}개의 물품을 구매하셨습니다.")
         await interaction.response.send_message(embed=embed)
 
+    @bot.tree.command(name="스터디방확인", description="스터디방(음성채널) EXP 설정과 현재 활성화 여부를 확인합니다")
+    async def slash_study_room_check(interaction: discord.Interaction):
+        settings = load_voice_channel_exp()
+        if not settings:
+            settings = VOICE_CHANNEL_EXP or {}
+        if not settings:
+            await interaction.response.send_message("❌ 등록된 스터디방(음성채널 EXP) 설정이 없습니다.", ephemeral=True)
+            return
+        now = datetime.now()
+        is_active_time = 6 <= now.hour < 24  # 경험치 지급 시간: 06:00 ~ 23:59
+        lines = []
+        for cid, (interval_min, exp_amt) in sorted(settings.items()):
+            ch = interaction.guild.get_channel(cid) if interaction.guild else None
+            name = ch.name if ch else str(cid)
+            status = "🟢 활성화" if is_active_time else "🔴 비활성화"
+            lines.append(f"• **{name}**: {interval_min}분마다 {exp_amt} exp · **{status}**")
+        embed = discord.Embed(
+            title="📋 스터디방 현황",
+            description="\n".join(lines),
+            color=discord.Color.green() if is_active_time else discord.Color.orange(),
+        )
+        embed.add_field(
+            name="현재 시간",
+            value=f"{now.hour:02d}:{now.minute:02d}",
+            inline=True,
+        )
+        embed.add_field(
+            name="경험치 지급 상태",
+            value="활성화 (06:00 ~ 23:59)" if is_active_time else "비활성화 (00:00 ~ 05:59)",
+            inline=True,
+        )
+        embed.set_footer(text="경험치 지급 시간: 06:00 ~ 23:59")
+        await interaction.response.send_message(embed=embed)
+
     # ========== /jk 그룹 (JK 관리자 전용) ==========
 
     jk_group = app_commands.Group(name="jk", description="JK 관리자 전용 명령어")
@@ -370,6 +404,8 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
         result = await add_exp(user.id, interaction.guild.id, amount)
+        details = f"EXP +{amount:,}, 레벨 {result['old_level']}→{result['new_level']}, 총 EXP {result.get('new_total_exp', 0):,}"
+        await send_command_log(interaction.client, interaction.user, "/jk exp add", target_user=user, details=details)
         embed = discord.Embed(title="경험치 추가", color=discord.Color.green())
         embed.add_field(name="대상", value=user.display_name, inline=False)
         embed.add_field(name="추가된 EXP", value=f"+{amount:,}", inline=True)
@@ -389,6 +425,8 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 경험치는 0 이상이어야 합니다.", ephemeral=True)
             return
         result = await set_current_exp(user.id, interaction.guild.id, amount)
+        details = f"EXP {amount:,}로 설정, 레벨 {result['old_level']}→{result['new_level']}, 총 EXP {result.get('new_total_exp', 0):,}"
+        await send_command_log(interaction.client, interaction.user, "/jk exp set", target_user=user, details=details)
         progress_pct = (result['new_exp'] / result['required_exp'] * 100) if result['required_exp'] > 0 else 100
         embed = discord.Embed(title="경험치 설정", color=discord.Color.blue())
         embed.add_field(name="대상", value=user.display_name, inline=False)
@@ -409,6 +447,8 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
         result = await add_level(user.id, interaction.guild.id, levels)
+        details = f"레벨 +{levels} ({result['old_level']}→{result['new_level']})"
+        await send_command_log(interaction.client, interaction.user, "/jk level add", target_user=user, details=details)
         embed = discord.Embed(title="레벨 추가", color=discord.Color.green())
         embed.add_field(name="대상", value=user.display_name, inline=False)
         embed.add_field(name="추가된 레벨", value=f"+{levels}", inline=True)
@@ -427,6 +467,8 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 레벨은 1 이상이어야 합니다.", ephemeral=True)
             return
         result = await set_level(user.id, interaction.guild.id, target_level, award_points=award_points)
+        details = f"레벨 {result['old_level']}→{result['new_level']}" + (f", 포인트 +{result.get('points_earned', 0)}" if result.get('points_earned', 0) else "")
+        await send_command_log(interaction.client, interaction.user, "/jk level set", target_user=user, details=details)
         embed = discord.Embed(title="레벨 설정", color=discord.Color.blue())
         embed.add_field(name="대상", value=user.display_name, inline=False)
         embed.add_field(name="이전/새 레벨", value=f"**{result['old_level']}** → **{result['new_level']}**", inline=True)
@@ -445,6 +487,7 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
         result = await add_points(user.id, interaction.guild.id, amount)
+        await send_command_log(interaction.client, interaction.user, "/jk points add", target_user=user, details=f"포인트 +{amount:,} (총 {result['new_points']:,})")
         embed = discord.Embed(title="포인트 추가", color=discord.Color.green())
         embed.add_field(name="대상", value=user.display_name, inline=False)
         embed.add_field(name="추가/새 포인트", value=f"+{amount:,} → **{result['new_points']:,}**", inline=True)
@@ -460,6 +503,7 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 포인트는 0 이상이어야 합니다.", ephemeral=True)
             return
         result = await set_points(user.id, interaction.guild.id, amount)
+        await send_command_log(interaction.client, interaction.user, "/jk points set", target_user=user, details=f"포인트 {result['old_points']:,}→{result['new_points']:,}")
         embed = discord.Embed(title="포인트 설정", color=discord.Color.blue())
         embed.add_field(name="대상", value=user.display_name, inline=False)
         embed.add_field(name="이전/새 포인트", value=f"**{result['old_points']:,}** → **{result['new_points']:,}**", inline=True)
@@ -482,6 +526,7 @@ async def setup_slash_commands(bot: discord.Client):
         embed.add_field(name="포인트 차감", value=f"-{result['points_deducted']:,} (잔액 {result['new_points']:,})", inline=True)
         embed.add_field(name="사유", value=reason, inline=False)
         await interaction.response.send_message(embed=embed)
+        await send_command_log(interaction.client, interaction.user, "/jk warning", target_user=member, details=f"경고 +{result['warning_count']} (총 {result['total_warnings']}회), 포인트 -{result['points_deducted']:,}")
         await send_warning_log(interaction.client, interaction.user, member, result['warning_count'], reason, result['total_warnings'], result['points_deducted'], result['new_points'])
         if restrictions['should_ban']:
             try:
@@ -503,6 +548,7 @@ async def setup_slash_commands(bot: discord.Client):
         if result['removed_count'] == 0:
             await interaction.response.send_message(f"❌ {member.display_name}님에게 해제할 경고가 없습니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk unwarn", target_user=member, details=f"경고 {result['removed_count']}개 해제, 남은 경고 {result['total_warnings']}개")
         embed = discord.Embed(title="✅ 경고 해제", color=discord.Color.green())
         embed.add_field(name="대상", value=member.display_name, inline=False)
         embed.add_field(name="해제/남은 경고", value=f"**{result['removed_count']}개** 해제, 남은 경고 **{result['total_warnings']}개**", inline=True)
@@ -522,6 +568,7 @@ async def setup_slash_commands(bot: discord.Client):
         user_id = member.id if member else None
         await add_server_fee(user_id, interaction.guild.id, amount, reason.strip() or "사유 없음", interaction.user.id)
         balance = await get_server_fee_balance(interaction.guild.id)
+        await send_command_log(interaction.client, interaction.user, "/jk server_fee add", target_user=member, details=f"+{amount:,}원 (사유: {reason}), 잔액 {balance:,}원")
         embed = discord.Embed(title="✅ 서버비 추가 완료", color=discord.Color.green())
         embed.add_field(name="기여자", value=member.display_name if member else "익명", inline=False)
         embed.add_field(name="추가/잔액", value=f"+{amount:,}원 / 잔액 **{balance:,}원**", inline=True)
@@ -545,6 +592,7 @@ async def setup_slash_commands(bot: discord.Client):
             return
         await remove_server_fee(interaction.guild.id, amount, reason.strip() or "사유 없음", interaction.user.id)
         balance = await get_server_fee_balance(interaction.guild.id)
+        await send_command_log(interaction.client, interaction.user, "/jk server_fee remove", details=f"-{amount:,}원 (사유: {reason}), 잔액 {balance:,}원")
         embed = discord.Embed(title="✅ 서버비 사용 기록", color=discord.Color.blue())
         embed.add_field(name="사용/잔액", value=f"-{amount:,}원 / 잔액 **{balance:,}원**", inline=True)
         await interaction.response.send_message(embed=embed)
@@ -559,6 +607,7 @@ async def setup_slash_commands(bot: discord.Client):
         current = await get_market_enabled(interaction.guild.id)
         await set_market_enabled(interaction.guild.id, not current)
         status = "활성화" if not current else "비활성화"
+        await send_command_log(interaction.client, interaction.user, "/jk market toggle", details=f"마켓 {status}")
         await interaction.response.send_message(f"✅ 마켓이 **{status}**되었습니다.")
 
     @market_group.command(name="list", description="마켓 파일(market.txt) 내용 조회")
@@ -589,6 +638,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message("❌ market.txt 파일을 찾을 수 없습니다.")
             return
+        await send_command_log(interaction.client, interaction.user, "/jk market clear", details="마켓 파일 전체 삭제")
         await interaction.response.send_message("✅ 마켓(market.txt) 내용이 모두 삭제되었습니다.")
 
     @market_group.command(name="remove", description="마켓에서 물품 코드로 제거")
@@ -603,6 +653,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message(f"❌ 물품 코드 `{code}`를 찾을 수 없습니다.")
             return
+        await send_command_log(interaction.client, interaction.user, "/jk market remove", details=f"물품 코드: {code}")
         await interaction.response.send_message(f"✅ 마켓에서 `{code}`가 제거되었습니다.")
 
     @market_group.command(name="add_ticket", description="티켓 물품 추가")
@@ -621,6 +672,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message(f"❌ 물품 코드 `{code}`가 이미 존재합니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk market add_ticket", details=f"티켓 {name} ({code}), 가격 {price:,}P")
         await interaction.response.send_message(f"✅ 티켓 물품 **{name}** (`{code}`) 추가 완료. 가격 {price:,}P")
 
     @market_group.command(name="add_role", description="역할 판매 추가")
@@ -639,6 +691,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message(f"❌ 물품 코드 `{code}`가 이미 존재합니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk market add_role", details=f"역할 {role_name} ({code}), 가격 {price:,}P")
         await interaction.response.send_message(f"✅ 역할 **{role_name}** (`{code}`) 추가 완료. 가격 {price:,}P")
 
     study_group = app_commands.Group(name="study", description="스터디 관리", parent=jk_group)
@@ -658,6 +711,7 @@ async def setup_slash_commands(bot: discord.Client):
             role = discord.utils.get(interaction.guild.roles, name=study_name)
             if role and member not in role.members:
                 await member.add_roles(role, reason=f"스터디 '{study_name}' 멤버 추가")
+        await send_command_log(interaction.client, interaction.user, "/jk study add", target_user=member, details=f"스터디: {study_name}")
         await interaction.response.send_message(f"✅ {member.display_name}님을 **{study_name}** 스터디에 추가했습니다.")
 
     @study_group.command(name="remove", description="스터디에서 멤버 제거")
@@ -673,6 +727,7 @@ async def setup_slash_commands(bot: discord.Client):
         role = discord.utils.get(interaction.guild.roles, name=study_name)
         if role and member in role.members:
             await member.remove_roles(role, reason=f"스터디 '{study_name}' 멤버 제거")
+        await send_command_log(interaction.client, interaction.user, "/jk study remove", target_user=member, details=f"스터디: {study_name}")
         await interaction.response.send_message(f"✅ {member.display_name}님을 **{study_name}** 스터디에서 제거했습니다.")
 
     @study_group.command(name="log", description="스터디 목록 (이름, 대표방, 역할, 참여 인원)")
@@ -752,6 +807,7 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
         if create_study(study_name, channel_id):
+            await send_command_log(interaction.client, interaction.user, "/jk study create", details=f"스터디: {study_name}, 채널 ID: {channel_id}")
             await interaction.response.send_message(f"✅ 스터디 **{study_name}** 생성 완료. 회의실 ID: {channel_id}")
         else:
             await interaction.response.send_message(f"❌ `{study_name}` 스터디가 이미 있거나 생성 실패.", ephemeral=True)
@@ -771,6 +827,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message("❌ 삭제 실패.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk study delete", details=f"스터디: {study_name}, 멤버 {count}명")
         await interaction.response.send_message(f"✅ 스터디 **{study_name}** 삭제 완료. (멤버 {count}명)")
 
     @study_group.command(name="warn", description="스터디 멤버에게 경고 부여")
@@ -783,6 +840,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message(f"❌ {member.display_name}님은 `{study_name}` 스터디에 없습니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk study warn", target_user=member, details=f"스터디: {study_name}, 사유: {reason}")
         await interaction.response.send_message(f"✅ **{study_name}** 스터디 {member.display_name}님에게 경고 부여: {reason}")
 
     @study_group.command(name="unwarn", description="스터디 멤버 경고 제거")
@@ -795,6 +853,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message(f"❌ {member.display_name}님은 `{study_name}` 스터디에 없거나 경고가 0입니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk study unwarn", target_user=member, details=f"스터디: {study_name}")
         await interaction.response.send_message(f"✅ **{study_name}** 스터디 {member.display_name}님 경고 1회 제거.")
 
     voice_group = app_commands.Group(name="voice", description="음성채널 EXP 설정", parent=jk_group)
@@ -828,6 +887,7 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 주기와 경험치는 1 이상이어야 합니다.", ephemeral=True)
             return
         add_voice_channel_exp(channel_id, interval_minutes, exp_amount)
+        await send_command_log(interaction.client, interaction.user, "/jk voice add", details=f"채널 ID {channel_id}, {interval_minutes}분마다 {exp_amount} exp")
         await interaction.response.send_message(f"✅ 채널 ID `{channel_id}`: {interval_minutes}분마다 {exp_amount} exp 추가.")
 
     @voice_group.command(name="remove", description="음성채널 EXP 설정 제거")
@@ -837,6 +897,7 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
         remove_voice_channel_exp(channel_id)
+        await send_command_log(interaction.client, interaction.user, "/jk voice remove", details=f"채널 ID {channel_id}")
         await interaction.response.send_message(f"✅ 채널 ID `{channel_id}` EXP 설정 제거됨.")
 
     level_system_group = app_commands.Group(name="level_system", description="레벨 구간 설정", parent=jk_group)
@@ -866,9 +927,11 @@ async def setup_slash_commands(bot: discord.Client):
             return
         if (start, end) in load_level_ranges():
             update_level_range(start, end, minutes, points)
+            await send_command_log(interaction.client, interaction.user, "/jk level_system set", details=f"{start}~{end}레벨 구간 수정: {minutes}분, {points}P")
             await interaction.response.send_message(f"✅ {start}~{end}레벨 구간 수정: {minutes}분, {points}P")
         else:
             add_level_range(start, end, minutes, points)
+            await send_command_log(interaction.client, interaction.user, "/jk level_system set", details=f"{start}~{end}레벨 구간 추가: {minutes}분, {points}P")
             await interaction.response.send_message(f"✅ {start}~{end}레벨 구간 추가: {minutes}분, {points}P")
 
     @level_system_group.command(name="remove", description="레벨 구간 제거")
@@ -881,6 +944,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not removed:
             await interaction.response.send_message(f"❌ {start}~{end} 구간을 찾을 수 없습니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk level_system remove", details=f"{start}~{end} 레벨 구간 제거")
         await interaction.response.send_message(f"✅ {start}~{end} 레벨 구간 제거됨.")
 
     tier_system_group = app_commands.Group(name="tier_system", description="티어 역할 설정", parent=jk_group)
@@ -909,6 +973,7 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 레벨은 0 이상이어야 합니다.", ephemeral=True)
             return
         add_tier_role(tier_name, required_level, role_name)
+        await send_command_log(interaction.client, interaction.user, "/jk tier_system set", details=f"티어 {tier_name}: 레벨 {required_level} 이상 → {role_name}")
         await interaction.response.send_message(f"✅ 티어 **{tier_name}**: 레벨 {required_level} 이상 → **{role_name}**")
 
     @tier_system_group.command(name="remove", description="티어 제거")
@@ -921,6 +986,7 @@ async def setup_slash_commands(bot: discord.Client):
         if not ok:
             await interaction.response.send_message(f"❌ 티어 `{tier_name}`를 찾을 수 없습니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk tier_system remove", details=f"티어: {tier_name}")
         await interaction.response.send_message(f"✅ 티어 **{tier_name}** 제거됨.")
 
     @jk_group.command(name="message", description="위 메시지를 지정 채널로 복사")
@@ -951,6 +1017,7 @@ async def setup_slash_commands(bot: discord.Client):
         except discord.Forbidden:
             await interaction.followup.send("❌ 해당 채널에 보낼 권한이 없습니다.", ephemeral=True)
             return
+        await send_command_log(interaction.client, interaction.user, "/jk message", details=f"{interaction.channel.mention} → {channel.mention}")
         await interaction.followup.send(f"✅ {interaction.channel.mention} → {channel.mention} 로 메시지 복사 완료.", ephemeral=True)
 
     @jk_group.command(name="clear", description="메시지 삭제")
@@ -979,6 +1046,7 @@ async def setup_slash_commands(bot: discord.Client):
             remaining -= len(purged)
             if remaining > 0:
                 await asyncio.sleep(0.5)
+        await send_command_log(interaction.client, interaction.user, "/jk clear", details=f"{deleted}개 메시지 삭제")
         await interaction.followup.send(f"✅ {deleted}개 메시지 삭제됨.", ephemeral=True)
 
     @jk_group.command(name="reboot", description="티어 시스템 재설정 (닉네임·역할 동기화)")
@@ -1000,6 +1068,7 @@ async def setup_slash_commands(bot: discord.Client):
             if success and old_t != new_t:
                 updated += 1
             await asyncio.sleep(0.05)
+        await send_command_log(interaction.client, interaction.user, "/jk reboot", details=f"{len(users)}명 중 {updated}명 티어 변경")
         await interaction.followup.send(f"✅ 완료. {len(users)}명 중 {updated}명 티어 변경됨.")
 
     debug_group = app_commands.Group(name="debug", description="디버그/상태 조회", parent=jk_group)

@@ -90,7 +90,7 @@ async def add_exp(user_id: int, guild_id: int, exp_to_add: int, use_transaction:
     
     if use_transaction:
         conn = await get_mysql_connection()
-        cursor = conn.cursor()  # aiosqlite: cursor()는 동기
+        cursor = await conn.cursor()  # aiosqlite: cursor()는 비동기(await 필요)
 
         try:
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:26]
