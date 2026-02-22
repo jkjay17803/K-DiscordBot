@@ -44,17 +44,18 @@ def voice_channel_command(k):
                 timestamp=datetime.now()
             )
             
-            for idx, (channel_id, (n, m)) in enumerate(sorted(settings.items()), 1):
-                # 채널 정보 가져오기
+            for idx, (channel_id, tup) in enumerate(sorted(settings.items()), 1):
+                n, m = tup[0], tup[1]
+                start_h, end_h = (tup[2], tup[3]) if len(tup) >= 4 else (6, 24)
+                time_range = f"{start_h:02d}:00~{end_h:02d}:00" if end_h < 24 else f"{start_h:02d}:00~24:00"
                 channel = ctx.bot.get_channel(channel_id)
                 if channel:
                     channel_name = f"{channel.name} ({channel.mention})"
                 else:
                     channel_name = f"ID: {channel_id} (채널을 찾을 수 없음)"
-                
                 embed.add_field(
                     name=f"{idx}. {channel_name}",
-                    value=f"**지급 주기:** {n}분마다\n**지급 경험치:** {m} exp",
+                    value=f"**지급 주기:** {n}분마다\n**지급 경험치:** {m} exp\n**지급 시간:** {time_range}",
                     inline=False
                 )
             

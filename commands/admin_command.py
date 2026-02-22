@@ -783,23 +783,20 @@ def admin_command(k):
                     join_time = session_info['join_time']
                     exp_interval = session_info['exp_interval']
                     exp_amount = session_info['exp_amount']
+                    start_h = session_info.get('exp_start_hour', 6)
+                    end_h = session_info.get('exp_end_hour', 24)
                     
-                    # 머문 시간 계산
                     current_time = datetime.now()
                     duration = current_time - join_time
                     duration_minutes = int(duration.total_seconds() / 60)
                     duration_hours = duration_minutes // 60
                     duration_mins = duration_minutes % 60
                     
-                    # 이번 세션에서 얻은 EXP 계산 (시간 제한 06:00 ~ 23:59 고려)
                     session_exp_earned = 0
-                    check_time = join_time + timedelta(minutes=exp_interval)  # 첫 지급은 join_time + exp_interval 후
+                    check_time = join_time + timedelta(minutes=exp_interval)
                     exp_interval_delta = timedelta(minutes=exp_interval)
-                    
                     while check_time <= current_time:
-                        check_hour = check_time.hour
-                        # 시간 제한 내에 있는지 확인
-                        if 6 <= check_hour < 24:
+                        if start_h <= check_time.hour < end_h:
                             session_exp_earned += exp_amount
                         check_time += exp_interval_delta
                     
@@ -819,8 +816,11 @@ def admin_command(k):
                     )
             
             member_list = "\n".join(member_details)
-            field_value = f"⏱️ 머문 시간 / ⭐ 이번 세션 EXP\n{member_list}\n(설정: {exp_settings[0]}분마다 {exp_settings[1]} EXP)"
-            
+            interval_min, exp_amt = exp_settings[0], exp_settings[1]
+            start_h, end_h = (exp_settings[2], exp_settings[3]) if len(exp_settings) >= 4 else (6, 24)
+            time_range = f"{start_h:02d}:00~{end_h:02d}:00" if end_h < 24 else f"{start_h:02d}:00~24:00"
+            field_value = f"⏱️ 머문 시간 / ⭐ 이번 세션 EXP\n{member_list}\n(설정: {interval_min}분마다 {exp_amt} EXP, **{time_range}**)"
+
             embed.add_field(
                 name=f"🎤 {channel.name} ({len(members)}명)",
                 value=field_value,

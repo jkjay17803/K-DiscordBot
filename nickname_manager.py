@@ -33,14 +33,15 @@ def get_original_nickname(nickname: str) -> str:
 
 
 def format_nickname_with_jk(original_nickname: str) -> str:
-    """JK 역할 사용자의 닉네임 형식화 (운영자 아이콘 추가)"""
-    # 이미 JK 아이콘이 포함되어 있는지 확인
-    if '[ ✬ ]' in original_nickname or '[✬]' in original_nickname:
-        # 이미 올바른 형식이면 그대로 반환
-        return original_nickname
-    
+    """JK 역할 사용자의 닉네임 형식화 (운영자 아이콘 추가). [Lv.N] 제거 후 [ ✬ ] 추가."""
+    # [Lv.N] 제거 (JK 부여 시 기존 레벨 표시 삭제)
+    clean_nickname = re.sub(r'\[Lv\.\d+\]\s*', '', original_nickname or '').strip()
     # 기존 JK 아이콘 제거 (다양한 형식 대응)
-    clean_nickname = re.sub(r'\[\s*✬\s*\]\s*', '', original_nickname).strip()
+    clean_nickname = re.sub(r'\[\s*✬\s*\]\s*', '', clean_nickname).strip()
+    
+    # 이미 JK 아이콘만 올바르게 붙어 있으면 (내용만 같으면) 그대로 반환
+    if original_nickname and (original_nickname == f"[ ✬ ] {clean_nickname}" or original_nickname == f"[✬] {clean_nickname}"):
+        return original_nickname
     
     # JK 아이콘 추가
     formatted = f"[ ✬ ] {clean_nickname}"
@@ -310,16 +311,16 @@ def setup_nickname_update_event(bot):
         if after.bot:
             return
         
-        # 1) JK 역할을 새로 부여받은 경우 → 별명에 [ ✬ ] 추가
+        # 1) JK 역할을 새로 부여받은 경우 → 별명에 [ ✬ ] 추가 (DB 미등록 사용자도 처리)
         before_has_jk = any(r.name == "JK" for r in before.roles)
         after_has_jk = any(r.name == "JK" for r in after.roles)
         if not before_has_jk and after_has_jk:
             try:
                 user = await get_user(after.id, after.guild.id)
-                if user:
-                    success = await update_user_nickname(after, user["level"])
-                    if success:
-                        print(f"[NicknameManager] JK 역할 부여 감지, 별명 업데이트: {after.name} → [ ✬ ] 표시")
+                level = user["level"] if user else 1
+                success = await update_user_nickname(after, level)
+                if success:
+                    print(f"[NicknameManager] JK 역할 부여 감지, 별명 업데이트: {after.name} → [ ✬ ] 표시")
             except Exception as e:
                 print(f"[NicknameManager] JK 역할 부여 시 별명 업데이트 오류: {after.name} - {e}")
             return

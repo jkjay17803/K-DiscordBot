@@ -42,7 +42,11 @@ from nickname_manager import update_user_nickname
 from role_manager import update_tier_role, get_tier_for_level
 from logger import send_command_log, send_levelup_log, send_tier_upgrade_log, send_warning_log, send_purchase_log
 from warning_system import issue_warning, check_warning_restrictions, remove_warning
-from voice_channel_exp_manager import load_voice_channel_exp, add_voice_channel_exp, remove_voice_channel_exp, update_voice_channel_exp
+from voice_channel_exp_manager import (
+    load_voice_channel_exp, add_voice_channel_exp, remove_voice_channel_exp, update_voice_channel_exp,
+    DEFAULT_START_HOUR, DEFAULT_END_HOUR,
+)
+from exp_ignore_manager import toggle_ignore as exp_ignore_toggle
 from level_ranges_manager import load_level_ranges, add_level_range, remove_level_ranges_by_range, update_level_range
 from tier_roles_manager import load_tier_roles, add_tier_role, remove_tier_role
 from config import VOICE_CHANNEL_EXP
@@ -357,7 +361,7 @@ async def setup_slash_commands(bot: discord.Client):
         embed.set_footer(text=f"총 {len(item_summary)}개의 물품을 구매하셨습니다.")
         await interaction.response.send_message(embed=embed)
 
-    @bot.tree.command(name="스터디방확인", description="스터디방(음성채널) EXP 설정과 현재 활성화 여부를 확인합니다")
+    @bot.tree.command(name="스터디목록확인", description="스터디방(음성채널) EXP 설정과 현재 활성화 여부를 확인합니다")
     async def slash_study_room_check(interaction: discord.Interaction):
         settings = load_voice_channel_exp()
         if not settings:
@@ -366,29 +370,25 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 등록된 스터디방(음성채널 EXP) 설정이 없습니다.", ephemeral=True)
             return
         now = datetime.now()
-        is_active_time = 6 <= now.hour < 24  # 경험치 지급 시간: 06:00 ~ 23:59
         lines = []
-        for cid, (interval_min, exp_amt) in sorted(settings.items()):
+        for cid, tup in sorted(settings.items()):
+            interval_min, exp_amt = tup[0], tup[1]
+            start_h, end_h = (tup[2], tup[3]) if len(tup) >= 4 else (6, 24)
             ch = interaction.guild.get_channel(cid) if interaction.guild else None
             name = ch.name if ch else str(cid)
-            status = "🟢 활성화" if is_active_time else "🔴 비활성화"
-            lines.append(f"• **{name}**: {interval_min}분마다 {exp_amt} exp · **{status}**")
+            is_active = start_h <= now.hour < end_h
+            status = "🟢 활성화" if is_active else "🔴 비활성화"
+            time_range = f"{start_h:02d}:00~{end_h:02d}:00" if end_h < 24 else f"{start_h:02d}:00~24:00"
+            lines.append(f"• **{name}**: {interval_min}분마다 {exp_amt} exp · **{time_range}** · **{status}**")
+        any_active = any((tup[2] if len(tup) >= 4 else 6) <= now.hour < (tup[3] if len(tup) >= 4 else 24) for tup in settings.values())
         embed = discord.Embed(
             title="📋 스터디방 현황",
             description="\n".join(lines),
-            color=discord.Color.green() if is_active_time else discord.Color.orange(),
+            color=discord.Color.green() if any_active else discord.Color.orange(),
         )
-        embed.add_field(
-            name="현재 시간",
-            value=f"{now.hour:02d}:{now.minute:02d}",
-            inline=True,
-        )
-        embed.add_field(
-            name="경험치 지급 상태",
-            value="활성화 (06:00 ~ 23:59)" if is_active_time else "비활성화 (00:00 ~ 05:59)",
-            inline=True,
-        )
-        embed.set_footer(text="경험치 지급 시간: 06:00 ~ 23:59")
+        embed.add_field(name="현재 시간", value=f"{now.hour:02d}:{now.minute:02d}", inline=True)
+        embed.add_field(name="표시", value="각 채널별 지급 시간대와 현재 활성화 여부", inline=True)
+        embed.set_footer(text="종료 시 24 = 23:59까지")
         await interaction.response.send_message(embed=embed)
 
     # ========== /jk 그룹 (JK 관리자 전용) ==========
@@ -437,6 +437,21 @@ async def setup_slash_commands(bot: discord.Client):
         await update_user_nickname(user, result['new_level'])
         if result['old_level'] != result['new_level']:
             await update_tier_role(user, result['new_level'])
+
+    @exp_group.command(name="ignore", description="EXP 지급 제외/해제 (토글)")
+    @app_commands.describe(user="EXP 지급 제외할 사용자 (이미 제외된 경우 다시 지급받도록 해제)")
+    async def jk_exp_ignore(interaction: discord.Interaction, user: discord.Member):
+        if not _check_jk(interaction):
+            await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
+            return
+        guild_id = interaction.guild.id
+        now_ignored = exp_ignore_toggle(guild_id, user.id)
+        if now_ignored:
+            await send_command_log(interaction.client, interaction.user, "/jk exp ignore", target_user=user, details="EXP 지급 제외")
+            await interaction.response.send_message(f"✅ **{user.display_name}**님은 이제 EXP 지급 대상에서 **제외**됩니다. (다시 받게 하려면 같은 명령을 한 번 더 사용하세요)")
+        else:
+            await send_command_log(interaction.client, interaction.user, "/jk exp ignore", target_user=user, details="EXP 지급 제외 해제")
+            await interaction.response.send_message(f"✅ **{user.display_name}**님은 이제 EXP를 **다시 받습니다**.")
 
     level_group = app_commands.Group(name="level", description="레벨 관리", parent=jk_group)
 
@@ -870,35 +885,74 @@ async def setup_slash_commands(bot: discord.Client):
             await interaction.response.send_message("❌ 등록된 음성채널 EXP 설정이 없습니다.")
             return
         lines = []
-        for cid, (n, m) in sorted(settings.items()):
+        for cid, tup in sorted(settings.items()):
+            n, m = tup[0], tup[1]
+            start_h, end_h = (tup[2], tup[3]) if len(tup) >= 4 else (DEFAULT_START_HOUR, DEFAULT_END_HOUR)
             ch = interaction.guild.get_channel(cid) if interaction.guild else None
             name = ch.name if ch else str(cid)
-            lines.append(f"• {name}: {n}분마다 {m} exp")
+            time_range = f"{start_h:02d}:00~{end_h:02d}:00" if end_h < 24 else f"{start_h:02d}:00~24:00"
+            lines.append(f"• {name}: {n}분마다 {m} exp · **{time_range}**")
         embed = discord.Embed(title="📋 음성채널 EXP 설정", description="\n".join(lines), color=discord.Color.blue())
+        embed.set_footer(text="종료 시 24 = 23:59까지")
         await interaction.response.send_message(embed=embed)
 
-    @voice_group.command(name="add", description="음성채널 EXP 설정 추가")
-    @app_commands.describe(channel_id="음성채널 ID", interval_minutes="지급 주기(분)", exp_amount="지급 경험치")
-    async def jk_voice_add(interaction: discord.Interaction, channel_id: int, interval_minutes: int, exp_amount: int):
+    @voice_group.command(name="add", description="음성채널 EXP 설정 추가·수정 (이미 있으면 덮어씀)")
+    @app_commands.describe(
+        channel_id="음성채널 ID (숫자만, 이미 등록된 채널이면 수정됨)",
+        interval_minutes="지급 주기(분)",
+        exp_amount="지급 경험치",
+        start_hour="지급 시작 시(0~23, 기본 6=06:00)",
+        end_hour="지급 종료 시(1~24, 미포함, 기본 24=23:59까지)",
+    )
+    async def jk_voice_add(
+        interaction: discord.Interaction,
+        channel_id: str,
+        interval_minutes: int,
+        exp_amount: int,
+        start_hour: int = DEFAULT_START_HOUR,
+        end_hour: int = DEFAULT_END_HOUR,
+    ):
         if not _check_jk(interaction):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
+            return
+        try:
+            cid = int(channel_id.strip())
+        except ValueError:
+            await interaction.response.send_message("❌ 채널 ID는 숫자만 입력해 주세요.", ephemeral=True)
             return
         if interval_minutes < 1 or exp_amount < 1:
             await interaction.response.send_message("❌ 주기와 경험치는 1 이상이어야 합니다.", ephemeral=True)
             return
-        add_voice_channel_exp(channel_id, interval_minutes, exp_amount)
-        await send_command_log(interaction.client, interaction.user, "/jk voice add", details=f"채널 ID {channel_id}, {interval_minutes}분마다 {exp_amount} exp")
-        await interaction.response.send_message(f"✅ 채널 ID `{channel_id}`: {interval_minutes}분마다 {exp_amount} exp 추가.")
+        if not (0 <= start_hour <= 23 and 1 <= end_hour <= 24 and start_hour < end_hour):
+            await interaction.response.send_message("❌ 시작 시(0~23), 종료 시(1~24), 시작 < 종료 여야 합니다.", ephemeral=True)
+            return
+        time_range = f"{start_hour:02d}:00~{end_hour:02d}:00" if end_hour < 24 else f"{start_hour:02d}:00~24:00"
+        existing = load_voice_channel_exp()
+        if cid in existing:
+            update_voice_channel_exp(cid, interval_minutes, exp_amount, start_hour, end_hour)
+            await send_command_log(interaction.client, interaction.user, "/jk voice add", details=f"채널 ID {cid} 수정: {interval_minutes}분마다 {exp_amount} exp, {time_range}")
+            await interaction.response.send_message(f"✅ 채널 ID `{cid}` 설정을 **수정**했습니다: {interval_minutes}분마다 {exp_amount} exp, **{time_range}**")
+        else:
+            add_voice_channel_exp(cid, interval_minutes, exp_amount, start_hour, end_hour)
+            await send_command_log(interaction.client, interaction.user, "/jk voice add", details=f"채널 ID {cid}, {interval_minutes}분마다 {exp_amount} exp, {time_range}")
+            await interaction.response.send_message(f"✅ 채널 ID `{cid}`: {interval_minutes}분마다 {exp_amount} exp, **{time_range}** 추가.")
 
     @voice_group.command(name="remove", description="음성채널 EXP 설정 제거")
-    @app_commands.describe(channel_id="음성채널 ID")
-    async def jk_voice_remove(interaction: discord.Interaction, channel_id: int):
+    @app_commands.describe(channel_id="음성채널 ID (숫자만, 긴 ID도 입력 가능)")
+    async def jk_voice_remove(interaction: discord.Interaction, channel_id: str):
         if not _check_jk(interaction):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
-        remove_voice_channel_exp(channel_id)
-        await send_command_log(interaction.client, interaction.user, "/jk voice remove", details=f"채널 ID {channel_id}")
-        await interaction.response.send_message(f"✅ 채널 ID `{channel_id}` EXP 설정 제거됨.")
+        try:
+            cid = int(channel_id.strip())
+        except ValueError:
+            await interaction.response.send_message("❌ 채널 ID는 숫자만 입력해 주세요.", ephemeral=True)
+            return
+        if not remove_voice_channel_exp(cid):
+            await interaction.response.send_message(f"❌ 채널 ID `{cid}`는 EXP 설정 목록에 없습니다.", ephemeral=True)
+            return
+        await send_command_log(interaction.client, interaction.user, "/jk voice remove", details=f"채널 ID {cid}")
+        await interaction.response.send_message(f"✅ 채널 ID `{cid}` EXP 설정 제거됨.")
 
     level_system_group = app_commands.Group(name="level_system", description="레벨 구간 설정", parent=jk_group)
 
@@ -1085,20 +1139,36 @@ async def setup_slash_commands(bot: discord.Client):
         embed.add_field(name="RAM", value=f"{mem.used / (1024**3):.2f} GB / {mem.total / (1024**3):.2f} GB", inline=True)
         await interaction.response.send_message(embed=embed)
 
-    @debug_group.command(name="exp", description="현재 시간대 경험치 획득 가능 여부")
+    @debug_group.command(name="exp", description="현재 시간대·각 보이스 채널별 경험치 활성화 여부")
     async def jk_debug_exp(interaction: discord.Interaction):
         if not _check_jk(interaction):
             await interaction.response.send_message("❌ JK 역할이 필요합니다.", ephemeral=True)
             return
         now = datetime.now()
-        can_earn = 6 <= now.hour < 24
+        settings = load_voice_channel_exp()
+        if not settings:
+            settings = VOICE_CHANNEL_EXP or {}
         embed = discord.Embed(
-            title="🔍 경험치 획득 시간 체크",
-            color=discord.Color.green() if can_earn else discord.Color.red(),
+            title="🔍 경험치 획득 시간·채널별 활성화",
+            color=discord.Color.blue(),
         )
         embed.add_field(name="현재 시간", value=f"{now.hour:02d}:{now.minute:02d}", inline=True)
-        embed.add_field(name="상태", value="✅ 획득 가능" if can_earn else "❌ 획득 불가", inline=True)
-        embed.add_field(name="경험치 획득 가능 시간", value="06:00 ~ 23:59", inline=False)
+        if not settings:
+            embed.add_field(name="보이스 채널", value="등록된 EXP 채널이 없습니다.", inline=False)
+            await interaction.response.send_message(embed=embed)
+            return
+        lines = []
+        for cid, tup in sorted(settings.items()):
+            interval_min, exp_amt = tup[0], tup[1]
+            start_h, end_h = (tup[2], tup[3]) if len(tup) >= 4 else (6, 24)
+            ch = interaction.guild.get_channel(cid) if interaction.guild else None
+            name = ch.name if ch else str(cid)
+            is_active = start_h <= now.hour < end_h
+            status = "🟢 활성화" if is_active else "🔴 비활성화"
+            time_range = f"{start_h:02d}:00~{end_h:02d}:00" if end_h < 24 else f"{start_h:02d}:00~24:00"
+            lines.append(f"• **{name}**: {time_range} · **{status}** ({interval_min}분마다 {exp_amt} exp)")
+        embed.add_field(name="채널별 활성화 여부", value="\n".join(lines), inline=False)
+        embed.set_footer(text="종료 시 24 = 23:59까지")
         await interaction.response.send_message(embed=embed)
 
     @debug_group.command(name="participants", description="음성채널 EXP 참여자 현황")
@@ -1121,7 +1191,9 @@ async def setup_slash_commands(bot: discord.Client):
         active_sessions = voice_monitor.active_sessions
         embed = discord.Embed(title="🔍 음성채널 참여자 현황", color=discord.Color.blue())
         has_any = False
-        for channel_id, (interval_min, exp_amt) in voice_exp.items():
+        for channel_id, tup in voice_exp.items():
+            interval_min, exp_amt = tup[0], tup[1]
+            start_h, end_h = (tup[2], tup[3]) if len(tup) >= 4 else (6, 24)
             channel = interaction.guild.get_channel(channel_id)
             if not channel:
                 continue
@@ -1129,6 +1201,7 @@ async def setup_slash_commands(bot: discord.Client):
             if not members:
                 continue
             has_any = True
+            time_range = f"{start_h:02d}:00~{end_h:02d}:00" if end_h < 24 else f"{start_h:02d}:00~24:00"
             lines = []
             for member in members:
                 sess = active_sessions.get(member.id)
@@ -1136,11 +1209,10 @@ async def setup_slash_commands(bot: discord.Client):
                     join_t = sess['join_time']
                     dur = datetime.now() - join_t
                     dur_m = int(dur.total_seconds() / 60)
-                    # 이번 세션에서 받은 exp (06~24시만)
                     earned = 0
                     t = join_t + timedelta(minutes=interval_min)
                     while t <= datetime.now():
-                        if 6 <= t.hour < 24:
+                        if start_h <= t.hour < end_h:
                             earned += exp_amt
                         t += timedelta(minutes=interval_min)
                     lines.append(f"{member.display_name}: {dur_m}분 / {earned}exp")
@@ -1148,7 +1220,7 @@ async def setup_slash_commands(bot: discord.Client):
                     lines.append(f"{member.display_name}: 0분 / 0exp")
             embed.add_field(
                 name=f"🎤 {channel.name} ({len(members)}명)",
-                value="\n".join(lines) + f"\n(설정: {interval_min}분마다 {exp_amt} EXP)",
+                value="\n".join(lines) + f"\n(설정: {interval_min}분마다 {exp_amt} EXP, **{time_range}**)",
                 inline=False,
             )
         if not has_any:

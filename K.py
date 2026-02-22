@@ -29,7 +29,7 @@ import asyncio
 from message_with_channel_id import message_with_channel_id
 from database import init_database, initialize_all_members, get_user
 from voice_monitor import setup_voice_monitor
-from nickname_manager import initial_nickname_update, update_user_nickname, setup_nickname_update_event
+from nickname_manager import initial_nickname_update, update_user_nickname, setup_nickname_update_event, setup_nickname_refresh
 from role_manager import initial_tier_role_update, update_tier_role
 from level_system import set_level
 from commands.slash_commands import setup_slash_commands
@@ -135,6 +135,10 @@ async def on_ready():
     # 닉네임 변경 이벤트 핸들러 설정 (이벤트 기반 업데이트)
     setup_nickname_update_event(k)
     print("[NicknameManager] Nickname update event handler registered (이벤트 기반)")
+
+    # 1시간마다 닉네임·티어 일괄 새로고침
+    setup_nickname_refresh(k)
+    print("[NicknameManager] 1시간마다 닉네임 새로고침 활성화")
 
     # Slash 명령어 동기화 (Beta V2)
     try:
